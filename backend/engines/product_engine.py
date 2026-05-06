@@ -1,33 +1,21 @@
 # backend/engines/product_engine.py
 # PRISM 2.1 — Product Understanding Engine
 
-import json
-import os
+import logging
 from typing import Any
 
-import google.generativeai as genai
-from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from models.schemas import ProductUnderstanding
+from utils.ai_client import generate_json_response
+
 
 # =========================================================
-# LOAD ENVIRONMENT VARIABLES
+# LOGGER CONFIGURATION
 # =========================================================
 
-load_dotenv()
+LOGGER = logging.getLogger(__name__)
 
-# =========================================================
-# GEMINI CONFIGURATION
-# =========================================================
-
-genai.configure(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
-
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash"
-)
 
 # =========================================================
 # SYSTEM PROMPT
@@ -36,12 +24,13 @@ model = genai.GenerativeModel(
 SYSTEM_PROMPT = """
 You are PRISM, an advanced AI-powered product intelligence system.
 
-Your task is to analyze digital products and return structured
+Your task:
+Analyze digital products and return structured
 product understanding in strict JSON format.
 
 RULES:
 - Return ONLY valid JSON
-- No markdown
+- Do NOT wrap JSON in markdown
 - No explanations
 - No extra commentary
 - No hallucinated statistics
@@ -49,11 +38,14 @@ RULES:
 - Lower confidence when uncertain
 """
 
+
 # =========================================================
 # PROMPT BUILDER
 # =========================================================
 
-def build_prompt(product_name: str) -> str:
+def build_prompt(
+    product_name: str
+) -> str:
 
     return f"""
 {SYSTEM_PROMPT}
@@ -83,121 +75,18 @@ IMPORTANT:
 - If uncertain, reduce confidence
 """
 
-# =========================================================
-# CLEAN JSON RESPONSE
-# =========================================================
-
-def clean_json_response(text: str) -> str:
-
-    text = text.strip()
-
-    # Remove opening markdown block
-    if text.startswith("```json"):
-        text = text[7:]
-
-    elif text.startswith("```"):
-        text = text[3:]
-
-    # Remove closing markdown block
-    if text.endswith("```"):
-        text = text[:-3]
-
-    return text.strip()
 
 # =========================================================
-# MAIN ENGINE FUNCTION
+# FALLBACK RESPONSE
 # =========================================================
 
-async def get_product_understanding(
+def build_fallback_response(
     product_name: str
 ) -> ProductUnderstanding:
 
-    try:
-
-        # -------------------------------------------------
-        # BUILD PROMPT
-        # -------------------------------------------------
-
-        prompt = build_prompt(product_name)
-
-        # -------------------------------------------------
-        # GEMINI REQUEST
-        # -------------------------------------------------
-
-        response = model.generate_content(
-            prompt
-        )
-
-        # -------------------------------------------------
-        # RAW OUTPUT
-        # -------------------------------------------------
-
-        raw_output = response.text
-
-        if not raw_output:
-            raise ValueError(
-                "Gemini returned empty response"
-            )
-
-        # -------------------------------------------------
-        # CLEAN RESPONSE
-        # -------------------------------------------------
-
-        cleaned_output = clean_json_response(
-            raw_output
-        )
-
-        # -------------------------------------------------
-        # PARSE JSON
-        # -------------------------------------------------
-
-        parsed_output: dict[str, Any] = json.loads(
-            cleaned_output
-        )
-
-        # -------------------------------------------------
-        # VALIDATE OUTPUT
-        # -------------------------------------------------
-
-        validated_output = ProductUnderstanding(
-            **parsed_output
-        )
-
-        return validated_output
-
-    # =====================================================
-    # JSON ERROR
-    # =====================================================
-
-    except json.JSONDecodeError as error:
-
-        print(
-            f"[product_engine] JSON parsing error: {error}"
-        )
-
-    # =====================================================
-    # VALIDATION ERROR
-    # =====================================================
-
-    except ValidationError as error:
-
-        print(
-            f"[product_engine] Schema validation error: {error}"
-        )
-
-    # =====================================================
-    # GENERAL ERROR
-    # =====================================================
-
-    except Exception as error:
-
-        print(
-            f"[product_engine] Unexpected error: {error}"
-        )
-
-    # =====================================================
-    # FALLBACK RESPONSE
-    # =====================================================
+    LOGGER.warning(
+        "Using fallback product understanding response"
+    )
 
     return ProductUnderstanding(
         product_name=product_name,
@@ -209,4 +98,77 @@ async def get_product_understanding(
         competitors=[],
         confidence_score=0.1,
         confidence_level="low"
+    )
+
+
+# =========================================================
+# MAIN ENGINE FUNCTION
+# =========================================================
+
+async def get_product_understanding(
+    product_name: str
+) -> ProductUnderstanding:
+
+    try:
+
+        LOGGER.info(
+            f"Generating product understanding for: {product_name}"
+        )
+
+        # -------------------------------------------------
+        # BUILD AI PROMPT
+        # -------------------------------------------------
+
+        prompt = build_prompt(
+            product_name
+        )
+
+        # -------------------------------------------------
+        # GENERATE STRUCTURED RESPONSE
+        # -------------------------------------------------
+
+        parsed_output: dict[str, Any] = (
+            generate_json_response(prompt)
+        )
+
+        # -------------------------------------------------
+        # PYDANTIC VALIDATION
+        # -------------------------------------------------
+
+        validated_output = ProductUnderstanding(
+            **parsed_output
+        )
+
+        LOGGER.info(
+            "Product understanding generated successfully"
+        )
+
+        return validated_output
+
+    # =====================================================
+    # SCHEMA VALIDATION ERROR
+    # =====================================================
+
+    except ValidationError as error:
+
+        LOGGER.error(
+            f"[product_engine] Schema validation failed: {error}"
+        )
+
+    # =====================================================
+    # GENERAL ENGINE ERROR
+    # =====================================================
+
+    except Exception as error:
+
+        LOGGER.error(
+            f"[product_engine] Engine execution failed: {error}"
+        )
+
+    # =====================================================
+    # FALLBACK RESPONSE
+    # =====================================================
+
+    return build_fallback_response(
+        product_name
     )

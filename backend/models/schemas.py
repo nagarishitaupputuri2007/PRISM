@@ -1,7 +1,7 @@
 # backend/models/schemas.py
 # PRISM 2.1 — Production Schema Layer
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Optional, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field, ConfigDict
 # SHARED TYPES
 # =========================================================
 
-ConfidenceLevel = Literal["high", "medium", "low"]
+ConfidenceLevel = Literal[
+    "high",
+    "medium",
+    "low"
+]
 
 PersonaType = Literal[
     "first_time_user",
@@ -60,10 +64,12 @@ EffortLevel = Literal[
 # =========================================================
 
 class PRISMBaseModel(BaseModel):
+
     model_config = ConfigDict(
-    extra="ignore",
-    validate_assignment=True
-)
+        extra="ignore",
+        validate_assignment=True,
+        str_strip_whitespace=True
+    )
 
 
 # =========================================================
@@ -71,6 +77,7 @@ class PRISMBaseModel(BaseModel):
 # =========================================================
 
 class AnalyzeRequest(PRISMBaseModel):
+
     product_name: str = Field(
         ...,
         min_length=1,
@@ -84,12 +91,19 @@ class AnalyzeRequest(PRISMBaseModel):
 # =========================================================
 
 class ProductUnderstanding(PRISMBaseModel):
-    product_name: str
-    category: str
+
+    product_name: str = Field(..., min_length=1)
+
+    category: str = Field(..., min_length=1)
+
     target_users: List[str]
+
     core_features: List[str]
-    value_prop: str
-    business_model: str
+
+    value_prop: str = Field(..., min_length=1)
+
+    business_model: str = Field(..., min_length=1)
+
     competitors: List[str]
 
     confidence_score: float = Field(
@@ -106,11 +120,21 @@ class ProductUnderstanding(PRISMBaseModel):
 # =========================================================
 
 class JourneyStep(PRISMBaseModel):
-    step: int = Field(..., ge=1)
 
-    action: str
+    step: int = Field(
+        ...,
+        ge=1
+    )
 
-    emotion: str
+    action: str = Field(
+        ...,
+        min_length=1
+    )
+
+    emotion: str = Field(
+        ...,
+        min_length=1
+    )
 
     confusion_level: int = Field(
         ...,
@@ -129,6 +153,7 @@ class JourneyStep(PRISMBaseModel):
 
 
 class PersonaSimulation(PRISMBaseModel):
+
     persona: PersonaType
 
     journey_steps: List[JourneyStep]
@@ -145,6 +170,7 @@ class PersonaSimulation(PRISMBaseModel):
 
 
 class SimulationOutput(PRISMBaseModel):
+
     personas: List[PersonaSimulation]
 
 
@@ -153,11 +179,18 @@ class SimulationOutput(PRISMBaseModel):
 # =========================================================
 
 class ProblemEvidence(PRISMBaseModel):
+
     persona_type: PersonaType
 
-    journey_step: int = Field(..., ge=1)
+    journey_step: int = Field(
+        ...,
+        ge=1
+    )
 
-    step_action: str
+    step_action: str = Field(
+        ...,
+        min_length=1
+    )
 
     confusion_level: int = Field(
         ...,
@@ -171,11 +204,18 @@ class ProblemEvidence(PRISMBaseModel):
 
 
 class DetectedProblem(PRISMBaseModel):
-    id: str
+
+    id: str = Field(
+        ...,
+        min_length=1
+    )
 
     problem_type: ProblemType
 
-    description: str
+    description: str = Field(
+        ...,
+        min_length=1
+    )
 
     severity: int = Field(
         ...,
@@ -193,6 +233,7 @@ class DetectedProblem(PRISMBaseModel):
 
 
 class ProblemOutput(PRISMBaseModel):
+
     problems: List[DetectedProblem]
 
 
@@ -201,25 +242,45 @@ class ProblemOutput(PRISMBaseModel):
 # =========================================================
 
 class DecisionTrace(PRISMBaseModel):
+
     persona: PersonaType
 
-    step: int = Field(..., ge=1)
+    step: int = Field(
+        ...,
+        ge=1
+    )
 
-    friction: str
+    friction: str = Field(
+        ...,
+        min_length=1
+    )
 
-    problem_id: str
+    problem_id: str = Field(
+        ...,
+        min_length=1
+    )
 
     problem_type: ProblemType
 
 
 class Decision(PRISMBaseModel):
+
     priority_rank: Optional[int] = None
 
-    action: str
+    action: str = Field(
+        ...,
+        min_length=1
+    )
 
-    expected_impact: str
+    expected_impact: str = Field(
+        ...,
+        min_length=1
+    )
 
-    impact_range: str
+    impact_range: str = Field(
+        ...,
+        min_length=1
+    )
 
     impact_type: ImpactType
 
@@ -253,7 +314,10 @@ class Decision(PRISMBaseModel):
 
     confidence_level: ConfidenceLevel
 
-    implementation_hint: str
+    implementation_hint: str = Field(
+        ...,
+        min_length=1
+    )
 
     trace: DecisionTrace
 
@@ -263,30 +327,57 @@ class Decision(PRISMBaseModel):
 # =========================================================
 
 class HealthDimensions(PRISMBaseModel):
-    ux: float = Field(..., ge=0, le=100)
 
-    features: float = Field(..., ge=0, le=100)
+    ux: float = Field(
+        ...,
+        ge=0,
+        le=100
+    )
 
-    onboarding: float = Field(..., ge=0, le=100)
+    features: float = Field(
+        ...,
+        ge=0,
+        le=100
+    )
 
-    retention: float = Field(..., ge=0, le=100)
+    onboarding: float = Field(
+        ...,
+        ge=0,
+        le=100
+    )
 
-    trust: float = Field(..., ge=0, le=100)
+    retention: float = Field(
+        ...,
+        ge=0,
+        le=100
+    )
+
+    trust: float = Field(
+        ...,
+        ge=0,
+        le=100
+    )
 
 
 class DecisionOutput(PRISMBaseModel):
+
     decisions: List[Decision]
 
     product_health_score: Optional[float] = None
 
-    health_dimensions: Optional[HealthDimensions] = None
+    health_dimensions: Optional[
+        HealthDimensions
+    ] = None
 
 
 # =========================================================
 # FINAL RESPONSE
 # =========================================================
 
-class PRISMAnalysisResponse(PRISMBaseModel):
+class PRISMAnalysisResponse(
+    PRISMBaseModel
+):
+
     product: ProductUnderstanding
 
     simulation: SimulationOutput
@@ -296,7 +387,7 @@ class PRISMAnalysisResponse(PRISMBaseModel):
     decisions: DecisionOutput
 
     analyzed_at: datetime = Field(
-        default_factory=datetime.utcnow
+        default_factory=lambda: datetime.now(UTC)
     )
 
     pipeline_version: str = "2.1"
@@ -307,8 +398,14 @@ class PRISMAnalysisResponse(PRISMBaseModel):
 # =========================================================
 
 class APIResponse(PRISMBaseModel):
-    status: Literal["success", "error"]
 
-    data: Optional[PRISMAnalysisResponse] = None
+    status: Literal[
+        "success",
+        "error"
+    ]
+
+    data: Optional[
+        PRISMAnalysisResponse
+    ] = None
 
     message: Optional[str] = None
