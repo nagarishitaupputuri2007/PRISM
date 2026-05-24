@@ -34,7 +34,10 @@ from models.schemas import (
     ProductUnderstanding,
     SimulationOutput
 )
-from utils.ai_client import generate_json_response
+
+from utils.ai_client import (
+    generate_json_response
+)
 
 
 # =========================================================
@@ -57,6 +60,62 @@ VALID_PROBLEM_TYPES = {
     "ONBOARDING_DROP_OFF",
     "RETENTION_DECLINE"
 }
+
+
+# =========================================================
+# VALID BUSINESS IMPACTS
+# =========================================================
+
+VALID_BUSINESS_IMPACTS = {
+    "conversion",
+    "retention",
+    "acquisition",
+    "engagement"
+}
+
+
+# =========================================================
+# BUSINESS IMPACT NORMALIZER
+# =========================================================
+
+def normalize_business_impact(
+    value: str
+) -> str:
+
+    normalized = (
+        value.strip()
+        .lower()
+    )
+
+    # -----------------------------------------------------
+    # COMMON AI SYNONYM MAPPING
+    # -----------------------------------------------------
+
+    synonym_map = {
+        "revenue": "conversion",
+        "sales": "conversion",
+        "growth": "acquisition",
+        "user_growth": "acquisition",
+        "stickiness": "retention",
+        "trust": "engagement",
+        "monetization": "conversion",
+        "subscriptions": "retention"
+    }
+
+    normalized = synonym_map.get(
+        normalized,
+        normalized
+    )
+
+    # -----------------------------------------------------
+    # SAFE FALLBACK
+    # -----------------------------------------------------
+
+    if normalized not in VALID_BUSINESS_IMPACTS:
+
+        return "engagement"
+
+    return normalized
 
 
 # =========================================================
@@ -95,6 +154,12 @@ VALID PROBLEM TYPES:
 5. TRUST_SECURITY_CONCERN
 6. ONBOARDING_DROP_OFF
 7. RETENTION_DECLINE
+
+VALID BUSINESS IMPACTS:
+1. conversion
+2. retention
+3. acquisition
+4. engagement
 """
 
 
@@ -154,6 +219,7 @@ IMPORTANT:
 - Churned users should contribute retention issues
 - First-time users should contribute onboarding issues
 - Business impact must logically match the problem
+- ONLY use valid business impacts
 """
 
 
@@ -353,6 +419,23 @@ async def detect_problems(
         parsed_output: dict[str, Any] = (
             generate_json_response(prompt)
         )
+
+        # -------------------------------------------------
+        # NORMALIZE AI OUTPUT
+        # -------------------------------------------------
+
+        for problem in parsed_output.get(
+            "problems",
+            []
+        ):
+
+            if "business_impact" in problem:
+
+                problem["business_impact"] = (
+                    normalize_business_impact(
+                        problem["business_impact"]
+                    )
+                )
 
         # -------------------------------------------------
         # PYDANTIC VALIDATION

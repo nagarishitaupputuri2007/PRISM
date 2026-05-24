@@ -1,13 +1,13 @@
 # backend/utils/ai_client.py
-# PRISM 2.1 — Centralized Gemini AI Client
+# PRISM 2.1 — Centralized AI Client (Groq)
 
 import json
 import logging
 import os
 from typing import Any
 
-import google.generativeai as genai
 from dotenv import load_dotenv
+from groq import Groq
 
 
 # =========================================================
@@ -35,49 +35,43 @@ load_dotenv()
 
 
 # =========================================================
-# GEMINI CONFIGURATION
+# GROQ CONFIGURATION
 # =========================================================
 
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY"
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY"
 )
 
-MODEL_NAME = "models/gemini-1.0-pro"
+MODEL_NAME = "llama-3.3-70b-versatile"
 
-GENERATION_CONFIG = {
-    "temperature": 0.2
-}
+TEMPERATURE = 0.2
 
 
 # =========================================================
 # API KEY VALIDATION
 # =========================================================
 
-if not GEMINI_API_KEY:
+if not GROQ_API_KEY:
 
     raise ValueError(
-        "Missing GEMINI_API_KEY in environment variables"
+        "Missing GROQ_API_KEY in environment variables"
     )
 
 LOGGER.info(
-    f"GEMINI_API_KEY loaded: {bool(GEMINI_API_KEY)}"
+    f"GROQ_API_KEY loaded: {bool(GROQ_API_KEY)}"
 )
 
 
 # =========================================================
-# GEMINI INITIALIZATION
+# GROQ CLIENT INITIALIZATION
 # =========================================================
 
-genai.configure(
-    api_key=GEMINI_API_KEY
-)
-
-MODEL = genai.GenerativeModel(
-    model_name=MODEL_NAME
+CLIENT = Groq(
+    api_key=GROQ_API_KEY
 )
 
 LOGGER.info(
-    f"Gemini model initialized: {MODEL_NAME}"
+    f"Groq client initialized with model: {MODEL_NAME}"
 )
 
 
@@ -123,36 +117,43 @@ def generate_text_response(
     try:
 
         LOGGER.info(
-            "Sending request to Gemini"
+            "Sending request to Groq"
         )
 
-        response = MODEL.generate_content(
-            prompt,
-            generation_config=GENERATION_CONFIG
+        response = CLIENT.chat.completions.create(
+            model=MODEL_NAME,
+            temperature=TEMPERATURE,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
         )
 
         LOGGER.info(
-            "Gemini response received"
+            "Groq response received"
         )
 
-        raw_output = getattr(
-            response,
-            "text",
-            None
+        raw_output = (
+            response
+            .choices[0]
+            .message
+            .content
         )
 
         if not raw_output:
 
             LOGGER.error(
-                f"Empty Gemini response object: {response}"
+                "Groq returned empty response"
             )
 
             raise ValueError(
-                "Gemini returned empty response"
+                "Empty AI response"
             )
 
         LOGGER.info(
-            f"Gemini output preview: "
+            f"AI output preview: "
             f"{raw_output[:200]}"
         )
 
