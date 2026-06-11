@@ -1,42 +1,56 @@
 # backend/engines/decision_engine.py
-# PRISM 2.1 — Product Decision Intelligence Engine
+# PRISM 2.5 — Enterprise Decision Intelligence Engine
 
 """
-This engine transforms validated UX problems
-into structured product decisions.
+PRISM decision intelligence engine.
 
 Responsibilities:
 - recommendation generation
-- action planning
-- implementation guidance
-- expected impact reasoning
-- traceable decision mapping
+- implementation reasoning
+- decision traceability
+- health dimension estimation
+- deterministic scoring integration
+- output normalization
+- validation hardening
+- fallback resilience
 
 This engine DOES NOT:
-- calculate RICE scores
-- rank decisions
-- calculate health scores
+- calculate raw RICE formulas
+- orchestrate pipeline stages
 
 Those responsibilities belong to:
-utils/scoring.py
+- utils/scoring.py
+- routers/analyze.py
 """
 
-import logging
 from typing import Any
 
 from pydantic import ValidationError
 
-from models.schemas import (
+from backend.models.schemas import (
     Decision,
     DecisionOutput,
     DecisionTrace,
     HealthDimensions,
     ProblemOutput,
     ProductUnderstanding,
-    SimulationOutput
+    SimulationOutput,
+    RootCauseOutput
 )
-from utils.ai_client import generate_json_response
-from utils.scoring import (
+
+from backend.services.ai_client import (
+    generate_json_response
+)
+
+from backend.core.logging import (
+    get_logger
+)
+
+from backend.core.metrics import (
+    increment_counter
+)
+
+from backend.scoring.scoring import (
     attach_scores_to_decisions,
     calculate_health_score,
     normalize_health_dimensions
@@ -44,10 +58,10 @@ from utils.scoring import (
 
 
 # =========================================================
-# LOGGER CONFIGURATION
+# LOGGER
 # =========================================================
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 # =========================================================
@@ -55,29 +69,23 @@ LOGGER = logging.getLogger(__name__)
 # =========================================================
 
 SYSTEM_PROMPT = """
-You are PRISM, an advanced product decision intelligence system.
+You are PRISM,
+an advanced product decision intelligence engine.
 
 Your task:
-Convert UX problems into realistic product decisions.
-
-You must:
-- generate practical recommendations
-- connect decisions directly to problems
-- estimate realistic impact
-- estimate reasonable implementation effort
-- provide concise implementation guidance
+Transform validated UX problems
+into realistic product recommendations.
 
 STRICT RULES:
 - Return ONLY valid JSON
 - Do NOT wrap JSON in markdown
 - No explanations
 - No fake analytics
-- No invented statistics
-- No unrealistic business claims
-- No duplicate decisions
-- Every decision must map to a specific problem
+- No unrealistic impact claims
+- No duplicate recommendations
+- Every decision MUST map to a problem
 - Recommendations must be actionable
-- Keep implementation hints concise
+- Implementation hints must remain concise
 
 IMPORTANT:
 - AI DOES NOT calculate RICE scores
@@ -93,51 +101,83 @@ IMPORTANT:
 def build_prompt(
     product: ProductUnderstanding,
     simulation: SimulationOutput,
-    problems: ProblemOutput
+    problems: ProblemOutput,
+    root_causes: RootCauseOutput
 ) -> str:
+    """
+    Build AI decision prompt.
+    """
 
     return f"""
 {SYSTEM_PROMPT}
 
-PRODUCT INFORMATION:
+PRODUCT:
+{product.model_dump_json(indent=2)}
 
-Product Name:
-{product.product_name}
-
-Category:
-{product.category}
-
-SIMULATION DATA:
+SIMULATION:
 {simulation.model_dump_json(indent=2)}
 
-PROBLEM DATA:
+PROBLEMS:
 {problems.model_dump_json(indent=2)}
 
-Return STRICT JSON in this exact structure:
+ROOT CAUSES:
+{root_causes.model_dump_json(indent=2)}
+
+Return STRICT JSON:
 
 {{
   "decisions": [
     {{
-      "action": "Simplify onboarding flow into fewer steps",
-      "expected_impact": "Reduce onboarding abandonment",
-      "impact_range": "10-25%",
-      "impact_type": "estimated",
-      "effort_level": "Medium",
+      "action": "Reduce onboarding fields from 7 to 3",
+
+      "root_cause":
+      "Users encounter excessive friction before receiving value",
+
+      "business_outcome":
+      "Increase activation rate",
+
+      "success_metric":
+      "Activation Rate",
+
+      "decision_rationale":
+      "First-time users consistently abandon onboarding before completing account creation",
+
+      "expected_impact":
+      "Reduce onboarding abandonment",
+
+      "impact_range":
+      "10-20%",
+
+      "impact_type":
+      "estimated",
+
+      "effort_level":
+      "Medium",
+
       "reach": 8,
+
       "impact": 7,
+
       "confidence": 0.82,
+
       "effort": 5,
-      "confidence_level": "high",
-      "implementation_hint": "Reduce unnecessary setup inputs and add progress indicators.",
+
+      "confidence_level":
+      "high",
+
+      "implementation_hint":
+      "Reduce unnecessary setup steps.",
+
       "trace": {{
         "persona": "first_time_user",
         "step": 2,
-        "friction": "Users struggled during onboarding setup",
+        "friction": "Users struggled during onboarding",
         "problem_id": "prob_001",
         "problem_type": "ONBOARDING_DROP_OFF"
       }}
     }}
   ],
+
   "health_dimensions": {{
     "ux": 72,
     "features": 80,
@@ -147,29 +187,125 @@ Return STRICT JSON in this exact structure:
   }}
 }}
 
+
 IMPORTANT:
-- Generate 3 to 8 realistic decisions
-- Every decision must connect to a problem
-- Avoid duplicate recommendations
-- Recommendations must be actionable
-- Health dimension scores must stay between 0 and 100
-- Impact ranges should feel realistic
-- Effort levels must align with implementation complexity
+- Generate between 3 and 6 decisions
+- Recommendations must remain realistic
+- Avoid duplicate actions
+- Effort should align with implementation complexity
+- Impact estimates should remain believable
+- Health dimensions must stay between 0 and 100
+- Every decision must explain the root cause
+- Every decision must define a business outcome
+- Every decision must define a measurable success metric
+- Every decision must include decision rationale
+- Root causes must be specific and actionable
+- Avoid generic recommendations
+- Success metrics must be measurable
+- Business outcomes must align with the referenced problem
 """
 
-
 # =========================================================
-# ACTION NORMALIZER
+# NORMALIZATION HELPERS
 # =========================================================
 
 def normalize_action(
     action: str
 ) -> str:
+    """
+    Normalize action text.
+    """
 
     return (
-        action
-        .strip()
+        action.strip()
         .lower()
+    )
+
+
+# =========================================================
+# DECISION NORMALIZATION
+# =========================================================
+
+def normalize_decision(
+    decision: Decision
+) -> Decision:
+    """
+    Normalize decision safely.
+    """
+
+    normalized_reach = max(
+        1.0,
+        min(decision.reach, 10.0)
+    )
+
+    normalized_impact = max(
+        1.0,
+        min(decision.impact, 10.0)
+    )
+
+    normalized_effort = max(
+        1.0,
+        min(decision.effort, 10.0)
+    )
+
+    normalized_confidence = max(
+        0.0,
+        min(decision.confidence, 1.0)
+    )
+
+    return decision.model_copy(
+        update={
+
+            "reach":
+                normalized_reach,
+
+            "impact":
+                normalized_impact,
+
+            "effort":
+                normalized_effort,
+
+            "confidence":
+                normalized_confidence
+        }
+    )
+
+
+# =========================================================
+# OUTPUT NORMALIZATION
+# =========================================================
+
+def normalize_decision_output(
+    decision_output: DecisionOutput
+) -> DecisionOutput:
+    """
+    Normalize all decisions safely.
+    """
+
+    normalized_decisions = [
+
+        normalize_decision(
+            decision
+        )
+
+        for decision
+        in decision_output.decisions
+    ]
+
+    normalized_dimensions = None
+
+    if decision_output.health_dimensions:
+
+        normalized_dimensions = (
+            normalize_health_dimensions(
+                decision_output
+                .health_dimensions
+            )
+        )
+
+    return DecisionOutput(
+        decisions=normalized_decisions,
+        health_dimensions=normalized_dimensions
     )
 
 
@@ -179,8 +315,12 @@ def normalize_action(
 
 def validate_decision_output(
     decision_output: DecisionOutput,
-    problems: ProblemOutput
+    problems: ProblemOutput,
+    root_causes: RootCauseOutput
 ) -> DecisionOutput:
+    """
+    Validate generated decisions.
+    """
 
     if not decision_output.decisions:
 
@@ -188,39 +328,72 @@ def validate_decision_output(
             "No decisions generated"
         )
 
+    if (
+        decision_output.health_dimensions
+        is None
+    ):
+
+        raise ValueError(
+            "Health dimensions missing"
+        )
+
+    valid_problem_ids = {
+
+        problem.id
+
+        for problem
+        in problems.problems
+    }
+    root_cause_map = {
+
+        root_cause.problem_id:
+            root_cause.root_cause
+
+        for root_cause
+        in root_causes.root_causes
+    }
     seen_actions = set()
 
-    seen_problem_traces = set()
+    seen_traces = set()
 
     validated_decisions = []
 
-    valid_problem_ids = {
-        problem.id
-        for problem in problems.problems
-    }
-
-    for decision in decision_output.decisions:
+    for decision in (
+        decision_output.decisions
+    ):
 
         # -------------------------------------------------
-        # UNIQUE ACTIONS
+        # ACTION DEDUPLICATION
         # -------------------------------------------------
 
-        normalized_action = normalize_action(
-            decision.action
+        normalized_action = (
+            normalize_action(
+                decision.action
+            )
         )
 
-        if normalized_action in seen_actions:
+        if (
+            normalized_action
+            in seen_actions
+        ):
 
-            raise ValueError(
-                "Duplicate decision actions detected"
+            LOGGER.warning(
+                f"Duplicate action removed: "
+                f"{decision.action}"
             )
+
+            increment_counter(
+                "decision_engine_duplicate_actions"
+            )
+
+            continue
 
         seen_actions.add(
             normalized_action
         )
 
         # -------------------------------------------------
-        # TRACE UNIQUENESS
+        # TRACE DEDUPLICATION
         # -------------------------------------------------
 
         trace_key = (
@@ -229,13 +402,19 @@ def validate_decision_output(
             decision.trace.step
         )
 
-        if trace_key in seen_problem_traces:
+        if trace_key in seen_traces:
 
-            raise ValueError(
-                "Duplicate decision traces detected"
+            LOGGER.warning(
+                "Duplicate trace removed"
             )
 
-        seen_problem_traces.add(
+            increment_counter(
+                "decision_engine_duplicate_traces"
+            )
+
+            continue
+
+        seen_traces.add(
             trace_key
         )
 
@@ -249,7 +428,7 @@ def validate_decision_output(
         ):
 
             raise ValueError(
-                f"Decision references unknown problem id: "
+                f"Unknown problem id referenced: "
                 f"{decision.trace.problem_id}"
             )
 
@@ -257,17 +436,96 @@ def validate_decision_output(
         # ACTION QUALITY
         # -------------------------------------------------
 
-        if len(decision.action.strip()) < 15:
+        if (
+            len(
+                decision.action.strip()
+            )
+            < 12
+        ):
 
             raise ValueError(
                 "Decision action too short"
             )
+        # -------------------------------------------------
+        # ROOT CAUSE QUALITY
+        # -------------------------------------------------
+        if (
+            len(
+                decision.root_cause.strip()
+            )
+            < 15
+        ):
 
+            raise ValueError(
+                "Root cause too short"
+            )
+        # -------------------------------------------------
+        # BUSINESS OUTCOME QUALITY
+        # -------------------------------------------------
+
+        if (
+            len(
+                decision.business_outcome.strip()
+            )
+            < 5
+        ):
+
+            raise ValueError(
+                "Business outcome too short"
+            )
+        # -------------------------------------------------
+        # SUCCESS METRIC QUALITY
+        # -------------------------------------------------
+
+        if (
+            len(
+                decision.success_metric.strip()
+            )
+            < 3
+        ):
+
+            raise ValueError(
+                "Success metric too short"
+            )
+        # -------------------------------------------------
+        # DECISION RATIONALE QUALITY
+        # -------------------------------------------------
+
+        if (
+            len(
+                decision.decision_rationale.strip()
+            )
+            < 15
+        ):
+
+            raise ValueError(
+                "Decision rationale too short"
+            )
+        
+        # -------------------------------------------------
+        # ROOT CAUSE CONSISTENCY
+        # -------------------------------------------------
+
+        if (
+            decision.trace.problem_id
+            not in root_cause_map
+        ):
+
+            raise ValueError(
+                "Missing root cause mapping"
+            )
         # -------------------------------------------------
         # IMPLEMENTATION QUALITY
         # -------------------------------------------------
 
-        if len(decision.implementation_hint.strip()) < 10:
+        if (
+            len(
+                decision
+                .implementation_hint
+                .strip()
+            )
+            < 10
+        ):
 
             raise ValueError(
                 "Implementation hint too short"
@@ -277,14 +535,16 @@ def validate_decision_output(
         # IMPACT RANGE FORMAT
         # -------------------------------------------------
 
-        if "%" not in decision.impact_range:
+        if "%" not in (
+            decision.impact_range
+        ):
 
             raise ValueError(
-                "Impact range must contain percentage"
+                "Impact range missing percentage"
             )
 
         # -------------------------------------------------
-        # IMPACT SANITY VALIDATION
+        # IMPACT SANITY CHECK
         # -------------------------------------------------
 
         if (
@@ -294,30 +554,38 @@ def validate_decision_output(
         ):
 
             raise ValueError(
-                "Decision impact appears unrealistic"
+                "Unrealistic decision scoring"
+            )
+
+        # -------------------------------------------------
+        # EFFORT CONSISTENCY
+        # -------------------------------------------------
+
+        if (
+            decision.effort_level == "Low"
+            and decision.effort >= 8
+        ):
+
+            raise ValueError(
+                "Effort level mismatch"
             )
 
         validated_decisions.append(
             decision
         )
 
-    # -----------------------------------------------------
-    # HEALTH DIMENSION NORMALIZATION
-    # -----------------------------------------------------
+    if not validated_decisions:
 
-    normalized_dimensions = None
-
-    if decision_output.health_dimensions:
-
-        normalized_dimensions = (
-            normalize_health_dimensions(
-                decision_output.health_dimensions
-            )
+        raise ValueError(
+            "No valid decisions generated"
         )
 
     return DecisionOutput(
         decisions=validated_decisions,
-        health_dimensions=normalized_dimensions
+        health_dimensions=(
+            decision_output
+            .health_dimensions
+        )
     )
 
 
@@ -326,48 +594,107 @@ def validate_decision_output(
 # =========================================================
 
 def build_fallback_response() -> DecisionOutput:
+    """
+    Build resilient fallback decision response.
+    """
 
     LOGGER.warning(
         "Using fallback decision response"
     )
 
-    fallback_decision = Decision(
-        action="Review onboarding and navigation experience",
-        expected_impact="Improve general user engagement",
-        impact_range="5-10%",
-        impact_type="estimated",
-        effort_level="Medium",
-        reach=5,
-        impact=5,
-        confidence=0.4,
-        effort=5,
-        confidence_level="low",
-        implementation_hint=(
-            "Perform additional UX analysis before implementation."
-        ),
-        trace=DecisionTrace(
-            persona="first_time_user",
-            step=1,
-            friction="Insufficient behavioral data",
-            problem_id="prob_fallback_001",
-            problem_type="NAVIGATION_CONFUSION"
+    increment_counter(
+        "decision_engine_fallbacks"
+    )
+
+    fallback_decision = (
+        Decision(
+            action=(
+                "Review onboarding and "
+                "navigation experience"
+            ),
+
+            root_cause=(
+                "Insufficient behavioral evidence "
+                "was available"
+            ),
+
+            business_outcome=(
+                "Improve user engagement"
+            ),
+
+            success_metric=(
+                "Engagement Rate"
+            ),
+
+            decision_rationale=(
+                "Fallback recommendation generated "
+                "due to unavailable decision "
+                "intelligence data."
+            ),
+
+            expected_impact=(
+                "Improve overall user engagement"
+            ),
+
+            impact_range="5-10%",
+
+            impact_type="estimated",
+
+            effort_level="Medium",
+
+            reach=5,
+
+            impact=5,
+
+            confidence=0.4,
+
+            effort=5,
+
+            confidence_level="low",
+
+            implementation_hint=(
+                "Perform additional UX analysis "
+                "before implementation."
+            ),
+
+            trace=DecisionTrace(
+                persona="first_time_user",
+
+                step=1,
+
+                friction=(
+                    "Insufficient behavioral data"
+                ),
+
+                problem_id="prob_fallback_001",
+
+                problem_type=
+                    "NAVIGATION_CONFUSION"
+            )
         )
     )
 
-    fallback_dimensions = HealthDimensions(
-        ux=50,
-        features=50,
-        onboarding=50,
-        retention=50,
-        trust=50
+    fallback_dimensions = (
+
+        HealthDimensions(
+            ux=50,
+            features=50,
+            onboarding=50,
+            retention=50,
+            trust=50
+        )
     )
 
-    scored_decisions = attach_scores_to_decisions(
-        [fallback_decision]
+    scored_decisions = (
+        attach_scores_to_decisions(
+            [fallback_decision]
+        )
     )
 
-    health_score = calculate_health_score(
-        fallback_dimensions
+    health_score = (
+        calculate_health_score(
+            fallback_dimensions
+        )
     )
 
     return DecisionOutput(
@@ -378,54 +705,83 @@ def build_fallback_response() -> DecisionOutput:
 
 
 # =========================================================
-# MAIN ENGINE FUNCTION
+# MAIN ENGINE
 # =========================================================
 
 async def generate_decisions(
     product: ProductUnderstanding,
     simulation: SimulationOutput,
-    problems: ProblemOutput
+    problems: ProblemOutput,
+    root_causes: RootCauseOutput
 ) -> DecisionOutput:
+    """
+    Generate realistic product decisions.
+    """
 
     try:
 
         LOGGER.info(
-            f"Generating decisions for: {product.product_name}"
+            f"Generating decisions for: "
+            f"{product.product_name}"
+        )
+
+        increment_counter(
+            "decision_engine_requests"
         )
 
         # -------------------------------------------------
-        # BUILD AI PROMPT
+        # BUILD PROMPT
         # -------------------------------------------------
 
         prompt = build_prompt(
             product,
             simulation,
-            problems
+            problems,
+            root_causes
         )
 
         # -------------------------------------------------
-        # GENERATE STRUCTURED RESPONSE
+        # AI GENERATION
         # -------------------------------------------------
 
         parsed_output: dict[str, Any] = (
-            generate_json_response(prompt)
+
+            generate_json_response(
+                prompt
+            )
         )
 
         # -------------------------------------------------
         # PYDANTIC VALIDATION
         # -------------------------------------------------
 
-        validated_output = DecisionOutput(
-            **parsed_output
+        validated_output = (
+
+            DecisionOutput(
+                **parsed_output
+            )
+        )
+
+        # -------------------------------------------------
+        # NORMALIZATION
+        # -------------------------------------------------
+
+        normalized_output = (
+            normalize_decision_output(
+                validated_output
+            )
         )
 
         # -------------------------------------------------
         # BUSINESS VALIDATION
         # -------------------------------------------------
 
-        validated_output = validate_decision_output(
-            validated_output,
-            problems
+        final_output = (
+            validate_decision_output(
+                normalized_output,
+                problems,
+                root_causes
+            )
         )
 
         # -------------------------------------------------
@@ -434,20 +790,27 @@ async def generate_decisions(
 
         scored_decisions = (
             attach_scores_to_decisions(
-                validated_output.decisions
+                final_output.decisions
             )
         )
 
         # -------------------------------------------------
-        # HEALTH SCORE CALCULATION
+        # HEALTH SCORE
         # -------------------------------------------------
 
         health_score = None
 
-        if validated_output.health_dimensions:
+        if (
+            final_output
+            .health_dimensions
+        ):
 
-            health_score = calculate_health_score(
-                validated_output.health_dimensions
+            health_score = (
+
+                calculate_health_score(
+                    final_output
+                    .health_dimensions
+                )
             )
 
         LOGGER.info(
@@ -455,33 +818,52 @@ async def generate_decisions(
         )
 
         return DecisionOutput(
+
             decisions=scored_decisions,
-            product_health_score=health_score,
-            health_dimensions=validated_output.health_dimensions
+
+            product_health_score=
+                health_score,
+
+            health_dimensions=(
+                final_output
+                .health_dimensions
+            )
         )
 
     # =====================================================
-    # SCHEMA VALIDATION ERROR
+    # SCHEMA FAILURE
     # =====================================================
 
     except ValidationError as error:
 
+        increment_counter(
+            "decision_engine_validation_failures"
+        )
+
         LOGGER.error(
-            f"[decision_engine] Schema validation failed: {error}"
+            f"[decision_engine] "
+            f"Schema validation failed: "
+            f"{error}"
         )
 
     # =====================================================
-    # GENERAL ENGINE ERROR
+    # ENGINE FAILURE
     # =====================================================
 
     except Exception as error:
 
+        increment_counter(
+            "decision_engine_failures"
+        )
+
         LOGGER.error(
-            f"[decision_engine] Engine execution failed: {error}"
+            f"[decision_engine] "
+            f"Execution failed: "
+            f"{error}"
         )
 
     # =====================================================
-    # FALLBACK RESPONSE
+    # FALLBACK
     # =====================================================
 
     return build_fallback_response()

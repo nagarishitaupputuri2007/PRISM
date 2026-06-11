@@ -1,9 +1,8 @@
 # backend/engines/problem_engine.py
-# PRISM 2.1 — UX Problem Detection Engine
+# PRISM 2.5 — Enterprise UX Problem Detection Engine
 
 """
-This engine converts behavioral simulations
-into structured UX and product problems.
+PRISM UX problem detection engine.
 
 Responsibilities:
 - friction pattern detection
@@ -11,23 +10,25 @@ Responsibilities:
 - evidence mapping
 - severity estimation
 - business impact tagging
+- AI output normalization
+- fallback resilience
+- deterministic validation
 
 This engine DOES NOT:
 - generate solutions
-- prioritize fixes
+- prioritize decisions
 - calculate RICE scores
-- rank recommendations
 
-Those responsibilities belong to the
-decision engine and scoring layer.
+Those responsibilities belong to:
+- decision_engine.py
+- scoring.py
 """
 
-import logging
 from typing import Any
 
 from pydantic import ValidationError
 
-from models.schemas import (
+from backend.models.schemas import (
     DetectedProblem,
     ProblemEvidence,
     ProblemOutput,
@@ -35,20 +36,28 @@ from models.schemas import (
     SimulationOutput
 )
 
-from utils.ai_client import (
+from backend.services.ai_client import (
     generate_json_response
+)
+
+from backend.core.logging import (
+    get_logger
+)
+
+from backend.core.metrics import (
+    increment_counter
 )
 
 
 # =========================================================
-# LOGGER CONFIGURATION
+# LOGGER
 # =========================================================
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 # =========================================================
-# REQUIRED PROBLEM TYPES
+# VALID ENUMS
 # =========================================================
 
 VALID_PROBLEM_TYPES = {
@@ -61,11 +70,6 @@ VALID_PROBLEM_TYPES = {
     "RETENTION_DECLINE"
 }
 
-
-# =========================================================
-# VALID BUSINESS IMPACTS
-# =========================================================
-
 VALID_BUSINESS_IMPACTS = {
     "conversion",
     "retention",
@@ -75,31 +79,62 @@ VALID_BUSINESS_IMPACTS = {
 
 
 # =========================================================
-# BUSINESS IMPACT NORMALIZER
+# NORMALIZATION HELPERS
 # =========================================================
 
-def normalize_business_impact(
+def normalize_text(
     value: str
 ) -> str:
+    """
+    Normalize text safely.
+    """
 
-    normalized = (
+    return (
         value.strip()
         .lower()
     )
 
-    # -----------------------------------------------------
-    # COMMON AI SYNONYM MAPPING
-    # -----------------------------------------------------
+
+def normalize_business_impact(
+    value: str
+) -> str:
+    """
+    Normalize hallucinated
+    AI business impact values.
+    """
+
+    normalized = normalize_text(
+        value
+    )
 
     synonym_map = {
-        "revenue": "conversion",
-        "sales": "conversion",
-        "growth": "acquisition",
-        "user_growth": "acquisition",
-        "stickiness": "retention",
-        "trust": "engagement",
-        "monetization": "conversion",
-        "subscriptions": "retention"
+
+        "revenue":
+            "conversion",
+
+        "sales":
+            "conversion",
+
+        "monetization":
+            "conversion",
+
+        "growth":
+            "acquisition",
+
+        "user_growth":
+            "acquisition",
+
+        "stickiness":
+            "retention",
+
+        "subscriptions":
+            "retention",
+
+        "trust":
+            "engagement",
+
+        "usage":
+            "engagement"
     }
 
     normalized = synonym_map.get(
@@ -107,11 +142,19 @@ def normalize_business_impact(
         normalized
     )
 
-    # -----------------------------------------------------
-    # SAFE FALLBACK
-    # -----------------------------------------------------
+    if (
+        normalized
+        not in VALID_BUSINESS_IMPACTS
+    ):
 
-    if normalized not in VALID_BUSINESS_IMPACTS:
+        LOGGER.warning(
+            f"Invalid business impact detected: "
+            f"{value}"
+        )
+
+        increment_counter(
+            "problem_engine_invalid_business_impacts"
+        )
 
         return "engagement"
 
@@ -123,28 +166,22 @@ def normalize_business_impact(
 # =========================================================
 
 SYSTEM_PROMPT = """
-You are PRISM, an advanced UX problem detection system.
+You are PRISM,
+an advanced UX problem detection engine.
 
 Your task:
-Analyze behavioral user simulations and detect
-realistic product and UX problems.
-
-You must:
-- identify meaningful friction patterns
-- classify problems accurately
-- attach evidence
-- estimate severity realistically
-- connect business impact logically
+Analyze behavioral simulations
+and identify realistic UX problems.
 
 STRICT RULES:
 - Return ONLY valid JSON
 - Do NOT wrap JSON in markdown
 - No explanations
-- No fake analytics
-- No invented statistics
-- No exaggerated severity
 - No duplicate problems
-- Problems must be grounded in journey evidence
+- No fake analytics
+- No invented metrics
+- Problems MUST be grounded in evidence
+- Business impact MUST use valid enum values
 
 VALID PROBLEM TYPES:
 1. CHECKOUT_COMPLEXITY
@@ -171,35 +208,33 @@ def build_prompt(
     product: ProductUnderstanding,
     simulation: SimulationOutput
 ) -> str:
+    """
+    Build AI problem-detection prompt.
+    """
 
     return f"""
 {SYSTEM_PROMPT}
 
-PRODUCT INFORMATION:
+PRODUCT:
+{product.model_dump_json(indent=2)}
 
-Product Name:
-{product.product_name}
-
-Category:
-{product.category}
-
-USER SIMULATION DATA:
+SIMULATION:
 {simulation.model_dump_json(indent=2)}
 
-Return STRICT JSON in this exact structure:
+Return STRICT JSON:
 
 {{
   "problems": [
     {{
       "id": "prob_001",
       "problem_type": "NAVIGATION_CONFUSION",
-      "description": "Users struggle to locate onboarding actions during early setup.",
+      "description": "Users struggle to locate important onboarding actions.",
       "severity": 7,
       "affected_persona": "first_time_user",
       "evidence": {{
         "persona_type": "first_time_user",
         "journey_step": 2,
-        "step_action": "Attempted account setup",
+        "step_action": "Attempted onboarding",
         "confusion_level": 4,
         "is_drop_off_step": false,
         "drop_off_reason": null
@@ -211,30 +246,73 @@ Return STRICT JSON in this exact structure:
 }}
 
 IMPORTANT:
-- Generate 3 to 8 realistic problems
-- Problems must directly connect to journey evidence
-- Severity must be between 1 and 10
-- Avoid duplicate problem descriptions
-- Use realistic UX reasoning
+- Generate between 3 and 6 problems
+- Avoid duplicate UX observations
+- Problems must map to evidence
+- Severity must remain realistic
+- High confusion should align with high severity
 - Churned users should contribute retention issues
 - First-time users should contribute onboarding issues
-- Business impact must logically match the problem
-- ONLY use valid business impacts
 """
 
 
 # =========================================================
-# DESCRIPTION NORMALIZER
+# PROBLEM NORMALIZATION
 # =========================================================
 
-def normalize_description(
-    description: str
-) -> str:
+def normalize_problem(
+    problem: DetectedProblem
+) -> DetectedProblem:
+    """
+    Normalize problem safely.
+    """
 
-    return (
-        description
-        .strip()
-        .lower()
+    normalized_severity = max(
+        1,
+        min(problem.severity, 10)
+    )
+
+    normalized_business_impact = (
+        normalize_business_impact(
+            problem.business_impact
+        )
+    )
+
+    return problem.model_copy(
+        update={
+
+            "severity":
+                normalized_severity,
+
+            "business_impact":
+                normalized_business_impact
+        }
+    )
+
+
+# =========================================================
+# OUTPUT NORMALIZATION
+# =========================================================
+
+def normalize_problem_output(
+    problem_output: ProblemOutput
+) -> ProblemOutput:
+    """
+    Normalize entire problem output.
+    """
+
+    normalized_problems = [
+
+        normalize_problem(
+            problem
+        )
+
+        for problem
+        in problem_output.problems
+    ]
+
+    return ProblemOutput(
+        problems=normalized_problems
     )
 
 
@@ -245,23 +323,27 @@ def normalize_description(
 def validate_problem_output(
     problem_output: ProblemOutput
 ) -> ProblemOutput:
+    """
+    Validate UX problem integrity.
+    """
+
+    validated_problems = []
 
     seen_problem_ids = set()
 
     seen_descriptions = set()
 
-    validated_problems = []
-
     for problem in problem_output.problems:
 
         # -------------------------------------------------
-        # UNIQUE PROBLEM IDS
+        # UNIQUE IDS
         # -------------------------------------------------
 
         if problem.id in seen_problem_ids:
 
             raise ValueError(
-                f"Duplicate problem id detected: {problem.id}"
+                f"Duplicate problem id: "
+                f"{problem.id}"
             )
 
         seen_problem_ids.add(
@@ -269,11 +351,11 @@ def validate_problem_output(
         )
 
         # -------------------------------------------------
-        # UNIQUE DESCRIPTIONS
+        # DEDUPLICATED DESCRIPTIONS
         # -------------------------------------------------
 
         normalized_description = (
-            normalize_description(
+            normalize_text(
                 problem.description
             )
         )
@@ -283,9 +365,16 @@ def validate_problem_output(
             in seen_descriptions
         ):
 
-            raise ValueError(
-                "Duplicate problem descriptions detected"
+            LOGGER.warning(
+                f"Duplicate problem description: "
+                f"{problem.description}"
             )
+
+            increment_counter(
+                "problem_engine_duplicate_descriptions"
+            )
+
+            continue
 
         seen_descriptions.add(
             normalized_description
@@ -301,7 +390,49 @@ def validate_problem_output(
         ):
 
             raise ValueError(
-                f"Invalid problem type: {problem.problem_type}"
+                f"Invalid problem type: "
+                f"{problem.problem_type}"
+            )
+
+        # -------------------------------------------------
+        # PERSONA CONSISTENCY
+        # -------------------------------------------------
+
+        if (
+            problem.affected_persona
+            != problem.evidence.persona_type
+        ):
+
+            raise ValueError(
+                "Affected persona mismatch"
+            )
+
+        # -------------------------------------------------
+        # SEVERITY SANITY CHECK
+        # -------------------------------------------------
+
+        confusion_level = (
+            problem
+            .evidence
+            .confusion_level
+        )
+
+        if (
+            confusion_level >= 4
+            and problem.severity < 5
+        ):
+
+            raise ValueError(
+                "Severity too low for high confusion"
+            )
+
+        if (
+            confusion_level <= 2
+            and problem.severity >= 9
+        ):
+
+            raise ValueError(
+                "Severity unrealistically high"
             )
 
         # -------------------------------------------------
@@ -317,34 +448,14 @@ def validate_problem_output(
                 "Problem description too short"
             )
 
-        # -------------------------------------------------
-        # PERSONA CONSISTENCY
-        # -------------------------------------------------
-
-        if (
-            problem.affected_persona
-            != problem.evidence.persona_type
-        ):
-
-            raise ValueError(
-                "Problem persona mismatch detected"
-            )
-
-        # -------------------------------------------------
-        # SEVERITY SANITY CHECK
-        # -------------------------------------------------
-
-        if (
-            problem.severity >= 9
-            and problem.evidence.confusion_level <= 2
-        ):
-
-            raise ValueError(
-                "Severity level appears unrealistic"
-            )
-
         validated_problems.append(
             problem
+        )
+
+    if not validated_problems:
+
+        raise ValueError(
+            "No valid problems generated"
         )
 
     return ProblemOutput(
@@ -357,54 +468,92 @@ def validate_problem_output(
 # =========================================================
 
 def build_fallback_response() -> ProblemOutput:
+    """
+    Build resilient fallback response.
+    """
 
     LOGGER.warning(
         "Using fallback problem response"
     )
 
-    fallback_problem = DetectedProblem(
-        id="prob_fallback_001",
-        problem_type="NAVIGATION_CONFUSION",
-        description=(
-            "Insufficient simulation data prevented "
-            "reliable UX problem detection."
-        ),
-        severity=3,
-        affected_persona="first_time_user",
-        evidence=ProblemEvidence(
-            persona_type="first_time_user",
-            journey_step=1,
-            step_action="Opened product",
-            confusion_level=2,
-            is_drop_off_step=False,
-            drop_off_reason=None
-        ),
-        confidence_level="low",
-        business_impact="engagement"
+    increment_counter(
+        "problem_engine_fallbacks"
+    )
+
+    fallback_problem = (
+
+        DetectedProblem(
+            id="prob_fallback_001",
+
+            problem_type=
+                "NAVIGATION_CONFUSION",
+
+            description=(
+                "Reliable UX problem detection "
+                "was unavailable for this analysis."
+            ),
+
+            severity=3,
+
+            affected_persona=
+                "first_time_user",
+
+            evidence=ProblemEvidence(
+
+                persona_type=
+                    "first_time_user",
+
+                journey_step=1,
+
+                step_action=
+                    "Opened product",
+
+                confusion_level=2,
+
+                is_drop_off_step=False,
+
+                drop_off_reason=None
+            ),
+
+            confidence_level="low",
+
+            business_impact=
+                "engagement"
+        )
     )
 
     return ProblemOutput(
-        problems=[fallback_problem]
+        problems=[
+            fallback_problem
+        ]
     )
 
 
 # =========================================================
-# MAIN ENGINE FUNCTION
+# MAIN ENGINE
 # =========================================================
 
 async def detect_problems(
     product: ProductUnderstanding,
     simulation: SimulationOutput
 ) -> ProblemOutput:
+    """
+    Detect realistic UX problems.
+    """
 
     try:
 
         LOGGER.info(
-            f"Detecting UX problems for: {product.product_name}"
+            f"Detecting UX problems for: "
+            f"{product.product_name}"
+        )
+
+        increment_counter(
+            "problem_engine_requests"
         )
 
         # -------------------------------------------------
-        # BUILD AI PROMPT
+        # BUILD PROMPT
         # -------------------------------------------------
 
         prompt = build_prompt(
@@ -413,15 +562,18 @@ async def detect_problems(
         )
 
         # -------------------------------------------------
-        # GENERATE STRUCTURED RESPONSE
+        # AI GENERATION
         # -------------------------------------------------
 
         parsed_output: dict[str, Any] = (
-            generate_json_response(prompt)
+
+            generate_json_response(
+                prompt
+            )
         )
 
         # -------------------------------------------------
-        # NORMALIZE AI OUTPUT
+        # OUTPUT NORMALIZATION
         # -------------------------------------------------
 
         for problem in parsed_output.get(
@@ -429,58 +581,90 @@ async def detect_problems(
             []
         ):
 
-            if "business_impact" in problem:
+            if (
+                "business_impact"
+                in problem
+            ):
 
-                problem["business_impact"] = (
-                    normalize_business_impact(
-                        problem["business_impact"]
-                    )
+                problem[
+                    "business_impact"
+                ] = normalize_business_impact(
+                    problem[
+                        "business_impact"
+                    ]
                 )
 
         # -------------------------------------------------
         # PYDANTIC VALIDATION
         # -------------------------------------------------
 
-        validated_output = ProblemOutput(
-            **parsed_output
+        validated_output = (
+
+            ProblemOutput(
+                **parsed_output
+            )
+        )
+
+        # -------------------------------------------------
+        # NORMALIZATION
+        # -------------------------------------------------
+
+        normalized_output = (
+            normalize_problem_output(
+                validated_output
+            )
         )
 
         # -------------------------------------------------
         # BUSINESS VALIDATION
         # -------------------------------------------------
 
-        validated_output = validate_problem_output(
-            validated_output
+        final_output = (
+            validate_problem_output(
+                normalized_output
+            )
         )
 
         LOGGER.info(
             "Problem detection completed successfully"
         )
 
-        return validated_output
+        return final_output
 
     # =====================================================
-    # SCHEMA VALIDATION ERROR
+    # SCHEMA FAILURE
     # =====================================================
 
     except ValidationError as error:
 
+        increment_counter(
+            "problem_engine_validation_failures"
+        )
+
         LOGGER.error(
-            f"[problem_engine] Schema validation failed: {error}"
+            f"[problem_engine] "
+            f"Schema validation failed: "
+            f"{error}"
         )
 
     # =====================================================
-    # GENERAL ENGINE ERROR
+    # ENGINE FAILURE
     # =====================================================
 
     except Exception as error:
 
+        increment_counter(
+            "problem_engine_failures"
+        )
+
         LOGGER.error(
-            f"[problem_engine] Engine execution failed: {error}"
+            f"[problem_engine] "
+            f"Execution failed: "
+            f"{error}"
         )
 
     # =====================================================
-    # FALLBACK RESPONSE
+    # FALLBACK
     # =====================================================
 
     return build_fallback_response()

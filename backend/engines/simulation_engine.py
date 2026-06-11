@@ -1,9 +1,8 @@
 # backend/engines/simulation_engine.py
-# PRISM 2.1 — Behavioral User Simulation Engine
+# PRISM 2.5 — Enterprise Behavioral Simulation Engine
 
 """
-This engine simulates realistic user journeys
-across multiple persona types.
+PRISM Behavioral User Simulation Engine.
 
 Responsibilities:
 - behavioral journey simulation
@@ -11,36 +10,51 @@ Responsibilities:
 - friction discovery
 - drop-off reasoning
 - UX interaction modeling
+- persona normalization
+- simulation validation
+- fallback resilience
 
-This engine DOES NOT:
-- detect problems
-- assign severity
+This layer DOES NOT:
+- detect UX problems
 - calculate scores
 - rank decisions
+- orchestrate routing
 
-Those responsibilities belong to later stages
-in the PRISM pipeline.
+Those responsibilities belong to:
+- routers/
+- utils/
+- downstream engines
 """
 
-import logging
 from typing import Any
 
 from pydantic import ValidationError
 
-from models.schemas import (
+from backend.models.schemas import (
     JourneyStep,
     PersonaSimulation,
     ProductUnderstanding,
     SimulationOutput
 )
-from utils.ai_client import generate_json_response
+
+from backend.services.ai_client import (
+    generate_json_response
+)
+
+from backend.core.logging import (
+    get_logger
+)
+
+from backend.core.metrics import (
+    increment_counter
+)
 
 
 # =========================================================
-# LOGGER CONFIGURATION
+# LOGGER
 # =========================================================
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 # =========================================================
@@ -163,12 +177,70 @@ IMPORTANT:
 
 
 # =========================================================
+# PERSONA NORMALIZATION
+# =========================================================
+
+def normalize_persona(
+    persona: PersonaSimulation
+) -> PersonaSimulation:
+    """
+    Normalize simulation values safely.
+    """
+
+    normalized_steps = []
+
+    for step in persona.journey_steps:
+
+        normalized_steps.append(
+
+            step.model_copy(
+                update={
+
+                    "confusion_level": max(
+                        1,
+                        min(
+                            step.confusion_level,
+                            5
+                        )
+                    ),
+
+                    "time_spent_seconds": max(
+                        1,
+                        step.time_spent_seconds
+                    )
+                }
+            )
+        )
+
+    satisfaction_score = max(
+        0.0,
+        min(
+            persona.satisfaction_score,
+            10.0
+        )
+    )
+
+    return persona.model_copy(
+        update={
+            "journey_steps":
+                normalized_steps,
+
+            "satisfaction_score":
+                satisfaction_score
+        }
+    )
+
+
+# =========================================================
 # SIMULATION VALIDATION
 # =========================================================
 
 def validate_simulation_output(
     simulation: SimulationOutput
 ) -> SimulationOutput:
+    """
+    Validate behavioral simulation integrity.
+    """
 
     personas = {
         persona.persona
@@ -176,21 +248,23 @@ def validate_simulation_output(
     }
 
     # -----------------------------------------------------
-    # ENSURE ALL PERSONAS EXIST
+    # REQUIRED PERSONAS
     # -----------------------------------------------------
 
     missing_personas = (
-        REQUIRED_PERSONAS - personas
+        REQUIRED_PERSONAS
+        - personas
     )
 
     if missing_personas:
 
         raise ValueError(
-            f"Missing personas: {missing_personas}"
+            f"Missing personas: "
+            f"{missing_personas}"
         )
 
     # -----------------------------------------------------
-    # ENSURE NO DUPLICATES
+    # DUPLICATE PERSONAS
     # -----------------------------------------------------
 
     if len(personas) != len(
@@ -201,7 +275,48 @@ def validate_simulation_output(
             "Duplicate personas detected"
         )
 
+    # -----------------------------------------------------
+    # JOURNEY VALIDATION
+    # -----------------------------------------------------
+
+    for persona in simulation.personas:
+
+        if len(
+            persona.journey_steps
+        ) < 1:
+
+            raise ValueError(
+                f"{persona.persona} "
+                f"has no journey steps"
+            )
+
     return simulation
+
+
+# =========================================================
+# NORMALIZATION
+# =========================================================
+
+def normalize_simulation(
+    simulation: SimulationOutput
+) -> SimulationOutput:
+    """
+    Normalize all personas safely.
+    """
+
+    normalized_personas = [
+
+        normalize_persona(
+            persona
+        )
+
+        for persona
+        in simulation.personas
+    ]
+
+    return SimulationOutput(
+        personas=normalized_personas
+    )
 
 
 # =========================================================
@@ -209,9 +324,16 @@ def validate_simulation_output(
 # =========================================================
 
 def build_fallback_response() -> SimulationOutput:
+    """
+    Build resilient fallback simulation.
+    """
 
     LOGGER.warning(
         "Using fallback simulation response"
+    )
+
+    increment_counter(
+        "simulation_engine_fallbacks"
     )
 
     fallback_step = JourneyStep(
@@ -229,13 +351,18 @@ def build_fallback_response() -> SimulationOutput:
     for persona_type in REQUIRED_PERSONAS:
 
         fallback_personas.append(
+
             PersonaSimulation(
                 persona=persona_type,
-                journey_steps=[fallback_step],
+                journey_steps=[
+                    fallback_step
+                ],
                 friction_points=[
                     "Limited simulation data"
                 ],
-                drop_off_reason="Simulation unavailable",
+                drop_off_reason=(
+                    "Simulation unavailable"
+                ),
                 satisfaction_score=3.0
             )
         )
@@ -252,15 +379,23 @@ def build_fallback_response() -> SimulationOutput:
 async def generate_user_simulation(
     product: ProductUnderstanding
 ) -> SimulationOutput:
+    """
+    Generate behavioral UX simulation.
+    """
 
     try:
 
         LOGGER.info(
-            f"Generating behavioral simulation for: {product.product_name}"
+            f"Generating behavioral simulation "
+            f"for: {product.product_name}"
+        )
+
+        increment_counter(
+            "simulation_engine_requests"
         )
 
         # -------------------------------------------------
-        # BUILD AI PROMPT
+        # BUILD PROMPT
         # -------------------------------------------------
 
         prompt = build_prompt(
@@ -268,53 +403,81 @@ async def generate_user_simulation(
         )
 
         # -------------------------------------------------
-        # GENERATE STRUCTURED RESPONSE
+        # AI GENERATION
         # -------------------------------------------------
 
         parsed_output: dict[str, Any] = (
-            generate_json_response(prompt)
+            generate_json_response(
+                prompt
+            )
         )
 
         # -------------------------------------------------
         # PYDANTIC VALIDATION
         # -------------------------------------------------
 
-        validated_output = SimulationOutput(
-            **parsed_output
+        validated_output = (
+            SimulationOutput(
+                **parsed_output
+            )
         )
 
         # -------------------------------------------------
         # BUSINESS VALIDATION
         # -------------------------------------------------
 
-        validated_output = validate_simulation_output(
-            validated_output
+        validated_output = (
+            validate_simulation_output(
+                validated_output
+            )
+        )
+
+        # -------------------------------------------------
+        # NORMALIZATION
+        # -------------------------------------------------
+
+        normalized_output = (
+            normalize_simulation(
+                validated_output
+            )
         )
 
         LOGGER.info(
             "Behavioral simulation generated successfully"
         )
 
-        return validated_output
+        return normalized_output
 
     # =====================================================
-    # SCHEMA VALIDATION ERROR
+    # VALIDATION FAILURE
     # =====================================================
 
     except ValidationError as error:
 
+        increment_counter(
+            "simulation_engine_validation_failures"
+        )
+
         LOGGER.error(
-            f"[simulation_engine] Schema validation failed: {error}"
+            f"[simulation_engine] "
+            f"Schema validation failed: "
+            f"{error}"
         )
 
     # =====================================================
-    # GENERAL ENGINE ERROR
+    # GENERAL FAILURE
     # =====================================================
 
     except Exception as error:
 
+        increment_counter(
+            "simulation_engine_failures"
+        )
+
         LOGGER.error(
-            f"[simulation_engine] Engine execution failed: {error}"
+            f"[simulation_engine] "
+            f"Engine execution failed: "
+            f"{error}"
         )
 
     # =====================================================

@@ -18,9 +18,8 @@ This validator handles:
 """
 
 import logging
-from typing import List
 
-from models.schemas import ProductUnderstanding
+from backend.models.schemas import ProductUnderstanding
 
 
 # =========================================================
@@ -43,10 +42,19 @@ MAX_TARGET_USERS = 10
 MAX_COMPETITORS = 15
 
 MIN_CATEGORY_LENGTH = 2
-MIN_VALUE_PROP_LENGTH = 10
 
-LOW_CONFIDENCE_THRESHOLD = 0.30
-HIGH_CONFIDENCE_THRESHOLD = 0.75
+MIN_VALUE_PROP_LENGTH = 10
+MAX_VALUE_PROP_LENGTH = 300
+
+
+# =========================================================
+# CONFIDENCE THRESHOLDS
+# =========================================================
+
+CONFIDENCE_THRESHOLDS = {
+    "low": 0.30,
+    "high": 0.75
+}
 
 
 # =========================================================
@@ -64,13 +72,27 @@ def is_valid_text(
 
 
 # =========================================================
+# TEXT NORMALIZER
+# =========================================================
+
+def normalize_text(
+    value: str
+) -> str:
+
+    return (
+        value.strip()
+        .lower()
+    )
+
+
+# =========================================================
 # LIST SANITIZER
 # =========================================================
 
 def sanitize_string_list(
-    items: List[str],
+    items: list[str],
     max_items: int
-) -> List[str]:
+) -> list[str]:
 
     seen = set()
 
@@ -78,17 +100,27 @@ def sanitize_string_list(
 
     for item in items:
 
-        # Skip invalid entries
+        # -------------------------------------------------
+        # SKIP INVALID VALUES
+        # -------------------------------------------------
+
         if not is_valid_text(item):
             continue
 
-        normalized = item.strip().lower()
+        normalized = normalize_text(
+            item
+        )
 
-        # Skip duplicates
+        # -------------------------------------------------
+        # SKIP DUPLICATES
+        # -------------------------------------------------
+
         if normalized in seen:
             continue
 
-        seen.add(normalized)
+        seen.add(
+            normalized
+        )
 
         cleaned_items.append(
             item.strip()
@@ -106,10 +138,20 @@ def validate_confidence_alignment(
     confidence_level: str
 ) -> bool:
 
-    if confidence_score >= HIGH_CONFIDENCE_THRESHOLD:
+    high_threshold = (
+        CONFIDENCE_THRESHOLDS["high"]
+    )
+
+    low_threshold = (
+        CONFIDENCE_THRESHOLDS["low"]
+    )
+
+    if confidence_score >= high_threshold:
+
         return confidence_level == "high"
 
-    if confidence_score >= LOW_CONFIDENCE_THRESHOLD:
+    if confidence_score >= low_threshold:
+
         return confidence_level == "medium"
 
     return confidence_level == "low"
@@ -124,7 +166,8 @@ def validate_product_understanding(
 ) -> ProductUnderstanding:
 
     LOGGER.info(
-        "Running business validation for product understanding"
+        "Running business validation "
+        "for product understanding"
     )
 
     # =====================================================
@@ -197,6 +240,8 @@ def validate_product_understanding(
         not is_valid_text(product.value_prop)
         or len(product.value_prop.strip())
         < MIN_VALUE_PROP_LENGTH
+        or len(product.value_prop.strip())
+        > MAX_VALUE_PROP_LENGTH
     ):
 
         raise ValueError(
@@ -224,6 +269,35 @@ def validate_product_understanding(
         MAX_COMPETITORS
     )
 
+    # -----------------------------------------------------
+    # PREVENT EMPTY COMPETITOR LIST
+    # -----------------------------------------------------
+
+    if not sanitized_competitors:
+
+        sanitized_competitors = [
+            "Unknown Competitor"
+        ]
+
+    # -----------------------------------------------------
+    # AI HALLUCINATION PROTECTION
+    # -----------------------------------------------------
+
+    normalized_product_name = normalize_text(
+        product.product_name
+    )
+
+    for competitor in sanitized_competitors:
+
+        if (
+            normalize_text(competitor)
+            == normalized_product_name
+        ):
+
+            raise ValueError(
+                "Product cannot compete with itself"
+            )
+
     # =====================================================
     # CONFIDENCE ALIGNMENT VALIDATION
     # =====================================================
@@ -234,7 +308,8 @@ def validate_product_understanding(
     ):
 
         raise ValueError(
-            "Confidence score and confidence level mismatch"
+            "Confidence score and confidence "
+            "level mismatch"
         )
 
     # =====================================================
@@ -247,6 +322,17 @@ def validate_product_understanding(
             "core_features": sanitized_core_features,
             "competitors": sanitized_competitors
         }
+    )
+
+    # =====================================================
+    # VALIDATION SUMMARY LOGGING
+    # =====================================================
+
+    LOGGER.info(
+        f"Validated product: "
+        f"{product.product_name} | "
+        f"Features={len(sanitized_core_features)} | "
+        f"Users={len(sanitized_target_users)}"
     )
 
     # =====================================================

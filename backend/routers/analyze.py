@@ -1,35 +1,40 @@
 # backend/routers/analyze.py
-# PRISM 2.1 — Analysis Pipeline Router
+# PRISM 2.3 — Production Pipeline Orchestrator
 
 """
-This router orchestrates the complete PRISM pipeline.
-
-Pipeline Flow:
-1. Product Understanding
-2. Behavioral Simulation
-3. Problem Detection
-4. Decision Intelligence
-5. Final Structured Response
+PRISM pipeline orchestration layer.
 
 Responsibilities:
 - request validation
-- pipeline orchestration
+- orchestration
+- execution tracking
+- caching
 - structured logging
-- API response consistency
-- failure isolation
+- pipeline timing
+- response formatting
+- request tracing
 
-This router DOES NOT:
-- contain AI logic
-- calculate scores directly
-- perform business reasoning
+This layer DOES NOT:
+- execute AI logic directly
+- perform domain reasoning
+- calculate scores
 
 Those responsibilities belong to:
 - engines/
 - utils/
 """
 
-import logging
+from backend.core.logging import (
+    get_logger
+)
 import time
+import uuid
+from collections.abc import (
+    Awaitable,
+    Callable
+)
+from dataclasses import dataclass
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -37,31 +42,49 @@ from fastapi import (
     status
 )
 
-from engines.decision_engine import (
+from backend.engines.decision_engine import (
     generate_decisions
 )
-from engines.problem_engine import (
+
+from backend.engines.problem_engine import (
     detect_problems
 )
-from engines.product_engine import (
+
+from backend.engines.root_cause_engine import (
+    analyze_root_causes
+)
+
+from backend.engines.product_engine import (
     get_product_understanding
 )
-from engines.simulation_engine import (
+
+from backend.engines.simulation_engine import (
     generate_user_simulation
 )
 
-from models.schemas import (
+from backend.models.schemas import (
     APIResponse,
     AnalyzeRequest,
     PRISMAnalysisResponse
 )
+
+from backend.services.cache import (
+    get_cache,
+    set_cache
+)
+
+from backend.core.metrics import (
+    track_pipeline_success,
+    track_pipeline_failure
+)
+
 
 
 # =========================================================
 # LOGGER CONFIGURATION
 # =========================================================
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 # =========================================================
@@ -72,6 +95,121 @@ router = APIRouter(
     prefix="/analyze",
     tags=["PRISM Analysis"]
 )
+
+
+# =========================================================
+# PIPELINE STAGE MODEL
+# =========================================================
+@dataclass
+class PipelineStage:
+
+    name: str
+
+    handler: Callable[..., Awaitable[Any]]
+
+# =========================================================
+# STAGE METRICS MODEL
+# =========================================================
+@dataclass
+class StageMetric:
+
+    stage_name: str
+
+    duration_seconds: float
+
+    success: bool
+
+# =========================================================
+# REQUEST ID GENERATOR
+# =========================================================
+
+def generate_request_id() -> str:
+
+    return (
+        f"req_"
+        f"{uuid.uuid4().hex[:8]}"
+    )
+
+
+# =========================================================
+# STAGE EXECUTOR
+# =========================================================
+
+async def execute_stage(
+    request_id: str,
+    stage: PipelineStage,
+    stage_position: int,
+    total_stages: int,
+    stage_metrics: list[StageMetric],
+    *args: Any
+) -> Any:
+    """
+    Execute pipeline stage with:
+    - timing
+    - request tracing
+    - structured logs
+    - reusable orchestration
+    """
+
+    LOGGER.info(
+        f"[{request_id}] "
+        f"[Stage {stage_position}/{total_stages}] "
+        f"Starting: {stage.name}"
+    )
+
+    stage_start = (
+        time.perf_counter()
+    )
+
+    try:
+
+        result = await stage.handler(
+            *args
+        )
+
+        duration = (
+            time.perf_counter()
+            - stage_start
+        )
+
+        stage_metrics.append(
+            StageMetric(
+                stage_name=stage.name,
+                duration_seconds=duration,
+                success=True
+            )
+        )
+
+        LOGGER.info(
+            f"[{request_id}] "
+            f"[Stage {stage_position}/{total_stages}] "
+            f"Completed: {stage.name} "
+            f"({duration:.2f}s)"
+        )
+
+        return result
+
+    except Exception:
+
+        duration = (
+            time.perf_counter()
+            - stage_start
+        )
+
+        stage_metrics.append(
+            StageMetric(
+                stage_name=stage.name,
+                duration_seconds=duration,
+                success=False
+            )
+        )
+
+        LOGGER.exception(
+            f"[{request_id}] "
+            f"Stage failed: {stage.name}"
+        )
+
+        raise
 
 
 # =========================================================
@@ -87,117 +225,204 @@ async def analyze_product(
     request: AnalyzeRequest
 ) -> APIResponse:
 
-    pipeline_start = time.perf_counter()
+    request_id = (
+        generate_request_id()
+    )
+
+    pipeline_start = (
+        time.perf_counter()
+    )
+
+    stage_metrics: list[
+        StageMetric
+    ] = []
 
     product_name = (
-        request.product_name.strip()
+        request.product_name
+        .strip()
     )
+
+    # =====================================================
+    # INPUT VALIDATION
+    # =====================================================
 
     if not product_name:
 
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
             detail={
                 "status": "error",
-                "message": "Product name cannot be empty"
+                "message": (
+                    "Product name cannot be empty"
+                )
             }
         )
 
+    normalized_product = (
+        product_name.lower()
+    )
+
     LOGGER.info(
-        f"Starting PRISM analysis for: {product_name}"
+        f"[{request_id}] "
+        f"Starting PRISM analysis for: "
+        f"{product_name}"
     )
 
     try:
 
         # =================================================
-        # STEP 1 — PRODUCT UNDERSTANDING
+        # CACHE CHECK
         # =================================================
 
-        stage_start = time.perf_counter()
-
-        LOGGER.info(
-            "Step 1/4 — Product understanding"
+        cached_response = get_cache(
+            normalized_product
         )
 
+        if cached_response:
+
+            LOGGER.info(
+                f"[{request_id}] "
+                f"Cache hit for: "
+                f"{product_name}"
+            )
+
+            total_duration = (
+                time.perf_counter()
+                - pipeline_start
+            )
+
+            track_pipeline_success(
+                total_duration
+            )
+
+            return APIResponse(
+                status="success",
+                data=cached_response,
+                message=(
+                    "Analysis retrieved from cache"
+                )
+            )
+        # =================================================
+        # PIPELINE DEFINITION
+        # =================================================
+
+        stages = [
+
+            PipelineStage(
+                name="Product Understanding",
+                handler=get_product_understanding
+            ),
+
+            PipelineStage(
+                name="Behavioral Simulation",
+                handler=generate_user_simulation
+            ),
+
+            PipelineStage(
+                name="Problem Detection",
+                handler=detect_problems
+            ),
+
+            PipelineStage(
+                name="Root Cause Analysis",
+                handler=analyze_root_causes
+            ),
+
+            PipelineStage(
+                name="Decision Intelligence",
+                handler=generate_decisions
+            )
+        ]
+
+        total_stages = len(
+            stages
+        )   
+
+        # =================================================
+        # STAGE 1 — PRODUCT UNDERSTANDING
+        # =================================================
+
         product_output = (
-            await get_product_understanding(
+            await execute_stage(
+                request_id,
+                stages[0],
+                1,
+                total_stages,
+                stage_metrics,
                 product_name
             )
         )
 
-        LOGGER.info(
-            f"Product understanding completed in "
-            f"{time.perf_counter() - stage_start:.2f}s"
-        )
-
         # =================================================
-        # STEP 2 — USER SIMULATION
+        # STAGE 2 — USER SIMULATION
         # =================================================
-
-        stage_start = time.perf_counter()
-
-        LOGGER.info(
-            "Step 2/4 — Behavioral simulation"
-        )
 
         simulation_output = (
-            await generate_user_simulation(
+            await execute_stage(
+                request_id,
+                stages[1],
+                2,
+                total_stages,
+                stage_metrics,
                 product_output
             )
         )
 
-        LOGGER.info(
-            f"Behavioral simulation completed in "
-            f"{time.perf_counter() - stage_start:.2f}s"
-        )
-
         # =================================================
-        # STEP 3 — PROBLEM DETECTION
+        # STAGE 3 — PROBLEM DETECTION
         # =================================================
-
-        stage_start = time.perf_counter()
-
-        LOGGER.info(
-            "Step 3/4 — Problem detection"
-        )
 
         problem_output = (
-            await detect_problems(
+            await execute_stage(
+                request_id,
+                stages[2],
+                3,
+                total_stages,
+                stage_metrics,
                 product_output,
                 simulation_output
             )
         )
-
-        LOGGER.info(
-            f"Problem detection completed in "
-            f"{time.perf_counter() - stage_start:.2f}s"
-        )
-
         # =================================================
-        # STEP 4 — DECISION INTELLIGENCE
+        # STAGE 4 — ROOT CAUSE ANALYSIS
         # =================================================
 
-        stage_start = time.perf_counter()
+        root_cause_output = (
 
-        LOGGER.info(
-            "Step 4/4 — Decision generation"
-        )
-
-        decision_output = (
-            await generate_decisions(
+            await execute_stage(
+                request_id,
+                stages[3],
+                4,
+                total_stages,
+                stage_metrics,
                 product_output,
-                simulation_output,
                 problem_output
             )
         )
 
-        LOGGER.info(
-            f"Decision generation completed in "
-            f"{time.perf_counter() - stage_start:.2f}s"
+        # =================================================
+        # STAGE 5 — DECISION GENERATION
+        # =================================================
+
+        decision_output = (
+
+            await execute_stage(
+                request_id,
+                stages[4],
+                5,
+                total_stages,
+                stage_metrics,
+                product_output,
+                simulation_output,
+                problem_output,
+                root_cause_output
+            )
         )
 
         # =================================================
-        # FINAL RESPONSE ASSEMBLY
+        # RESPONSE ASSEMBLY
         # =================================================
 
         final_response = (
@@ -205,29 +430,85 @@ async def analyze_product(
                 product=product_output,
                 simulation=simulation_output,
                 problems=problem_output,
+                root_causes=root_cause_output,
                 decisions=decision_output,
-                pipeline_version="2.1"
+                pipeline_version="2.5"
             )
         )
 
-        total_duration = (
-            time.perf_counter() - pipeline_start
+        # =================================================
+        # CACHE STORAGE
+        # =================================================
+
+        set_cache(
+            normalized_product,
+            final_response
         )
 
         LOGGER.info(
-            f"PRISM analysis completed successfully "
-            f"for: {product_name} "
-            f"in {total_duration:.2f}s"
+            f"[{request_id}] "
+            f"Analysis cached successfully"
+        )
+
+        # =================================================
+        # PIPELINE METRICS
+        # =================================================
+
+        total_duration = (
+            time.perf_counter()
+            - pipeline_start
+        )
+
+        successful_stages = sum(
+            1
+            for metric in stage_metrics
+            if metric.success
+        )
+
+        LOGGER.info(
+            f"[{request_id}] "
+            f"Pipeline completed successfully"
+        )
+
+        LOGGER.info(
+            f"[{request_id}] "
+            f"Total duration: "
+            f"{total_duration:.2f}s"
+        )
+
+        LOGGER.info(
+            f"[{request_id}] "
+            f"Completed stages: "
+            f"{successful_stages}/{total_stages}"
+        )
+
+        for metric in stage_metrics:
+
+            LOGGER.info(
+                f"[{request_id}] "
+                f"Metric | "
+                f"Stage={metric.stage_name} | "
+                f"Duration={metric.duration_seconds:.2f}s | "
+                f"Success={metric.success}"
+            )
+
+        # =================================================
+        # SUCCESS RESPONSE
+        # =================================================
+        track_pipeline_success(
+            total_duration
         )
 
         return APIResponse(
             status="success",
             data=final_response,
-            message="Analysis completed successfully"
+            message=(
+                "Analysis completed successfully"
+            )
         )
 
     # =====================================================
-    # HTTP ERROR HANDLING
+    # HTTP FAILURES
     # =====================================================
 
     except HTTPException:
@@ -235,17 +516,21 @@ async def analyze_product(
         raise
 
     # =====================================================
-    # UNEXPECTED PIPELINE FAILURE
+    # PIPELINE FAILURES
     # =====================================================
 
     except Exception as error:
-
+        track_pipeline_failure()
+        
         LOGGER.exception(
-            f"[analyze_router] Pipeline failed: {error}"
+            f"[{request_id}] "
+            f"Pipeline failed: {error}"
         )
 
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
             detail={
                 "status": "error",
                 "message": (

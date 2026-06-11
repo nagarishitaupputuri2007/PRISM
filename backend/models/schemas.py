@@ -1,74 +1,173 @@
 # backend/models/schemas.py
-# PRISM 2.1 — Production Schema Layer
+# PRISM 2.2 — Enterprise Schema Layer
 
-from datetime import datetime, UTC
-from typing import List, Optional, Literal
+from datetime import (
+    UTC,
+    datetime
+)
+from enum import Enum
+from typing import Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator
+)
 
 
 # =========================================================
-# SHARED TYPES
+# ENUM TYPES
 # =========================================================
 
-ConfidenceLevel = Literal[
-    "high",
-    "medium",
-    "low"
-]
+class ConfidenceLevel(
+    str,
+    Enum
+):
 
-PersonaType = Literal[
-    "first_time_user",
-    "power_user",
-    "churned_user"
-]
+    HIGH = "high"
 
-EvidenceType = Literal[
-    "pattern_based",
-    "behavioral",
-    "inferred"
-]
+    MEDIUM = "medium"
 
-BusinessImpactType = Literal[
-    "conversion",
-    "retention",
-    "acquisition",
-    "engagement"
-]
+    LOW = "low"
 
-ProblemType = Literal[
-    "CHECKOUT_COMPLEXITY",
-    "NAVIGATION_CONFUSION",
-    "DECISION_OVERLOAD",
-    "PERFORMANCE_LATENCY",
-    "TRUST_SECURITY_CONCERN",
-    "ONBOARDING_DROP_OFF",
-    "RETENTION_DECLINE"
-]
 
-ImpactType = Literal[
-    "benchmark_based",
-    "estimated",
-    "inferred"
-]
+class PersonaType(
+    str,
+    Enum
+):
 
-EffortLevel = Literal[
-    "Low",
-    "Medium",
-    "High"
-]
+    FIRST_TIME_USER = (
+        "first_time_user"
+    )
+
+    POWER_USER = (
+        "power_user"
+    )
+
+    CHURNED_USER = (
+        "churned_user"
+    )
+
+
+class EvidenceType(
+    str,
+    Enum
+):
+
+    PATTERN_BASED = (
+        "pattern_based"
+    )
+
+    BEHAVIORAL = (
+        "behavioral"
+    )
+
+    INFERRED = (
+        "inferred"
+    )
+
+
+class BusinessImpactType(
+    str,
+    Enum
+):
+
+    CONVERSION = (
+        "conversion"
+    )
+
+    RETENTION = (
+        "retention"
+    )
+
+    ACQUISITION = (
+        "acquisition"
+    )
+
+    ENGAGEMENT = (
+        "engagement"
+    )
+
+
+class ProblemType(
+    str,
+    Enum
+):
+
+    CHECKOUT_COMPLEXITY = (
+        "CHECKOUT_COMPLEXITY"
+    )
+
+    NAVIGATION_CONFUSION = (
+        "NAVIGATION_CONFUSION"
+    )
+
+    DECISION_OVERLOAD = (
+        "DECISION_OVERLOAD"
+    )
+
+    PERFORMANCE_LATENCY = (
+        "PERFORMANCE_LATENCY"
+    )
+
+    TRUST_SECURITY_CONCERN = (
+        "TRUST_SECURITY_CONCERN"
+    )
+
+    ONBOARDING_DROP_OFF = (
+        "ONBOARDING_DROP_OFF"
+    )
+
+    RETENTION_DECLINE = (
+        "RETENTION_DECLINE"
+    )
+
+
+class ImpactType(
+    str,
+    Enum
+):
+
+    BENCHMARK_BASED = (
+        "benchmark_based"
+    )
+
+    ESTIMATED = (
+        "estimated"
+    )
+
+    INFERRED = (
+        "inferred"
+    )
+
+
+class EffortLevel(
+    str,
+    Enum
+):
+
+    LOW = "Low"
+
+    MEDIUM = "Medium"
+
+    HIGH = "High"
 
 
 # =========================================================
 # BASE MODEL
 # =========================================================
 
-class PRISMBaseModel(BaseModel):
+class PRISMBaseModel(
+    BaseModel
+):
 
     model_config = ConfigDict(
         extra="ignore",
         validate_assignment=True,
-        str_strip_whitespace=True
+        str_strip_whitespace=True,
+        use_enum_values=True,
+        populate_by_name=True
     )
 
 
@@ -76,13 +175,19 @@ class PRISMBaseModel(BaseModel):
 # REQUEST MODELS
 # =========================================================
 
-class AnalyzeRequest(PRISMBaseModel):
+class AnalyzeRequest(
+    PRISMBaseModel
+):
 
     product_name: str = Field(
         ...,
         min_length=1,
         max_length=200,
-        description="Name of the product to analyze"
+        description=(
+            "Name of the product "
+            "to analyze"
+        ),
+        examples=["Spotify"]
     )
 
 
@@ -90,21 +195,35 @@ class AnalyzeRequest(PRISMBaseModel):
 # PRODUCT UNDERSTANDING
 # =========================================================
 
-class ProductUnderstanding(PRISMBaseModel):
+class ProductUnderstanding(
+    PRISMBaseModel
+):
 
-    product_name: str = Field(..., min_length=1)
+    product_name: str = Field(
+        ...,
+        min_length=1
+    )
 
-    category: str = Field(..., min_length=1)
+    category: str = Field(
+        ...,
+        min_length=1
+    )
 
-    target_users: List[str]
+    target_users: list[str]
 
-    core_features: List[str]
+    core_features: list[str]
 
-    value_prop: str = Field(..., min_length=1)
+    value_prop: str = Field(
+        ...,
+        min_length=1
+    )
 
-    business_model: str = Field(..., min_length=1)
+    business_model: str = Field(
+        ...,
+        min_length=1
+    )
 
-    competitors: List[str]
+    competitors: list[str]
 
     confidence_score: float = Field(
         ...,
@@ -114,12 +233,33 @@ class ProductUnderstanding(PRISMBaseModel):
 
     confidence_level: ConfidenceLevel
 
+    @field_validator(
+        "target_users",
+        "core_features",
+        "competitors"
+    )
+    @classmethod
+    def validate_non_empty_lists(
+        cls,
+        value: list[str]
+    ) -> list[str]:
+
+        if not value:
+
+            raise ValueError(
+                "List cannot be empty"
+            )
+
+        return value
+
 
 # =========================================================
 # USER SIMULATION
 # =========================================================
 
-class JourneyStep(PRISMBaseModel):
+class JourneyStep(
+    PRISMBaseModel
+):
 
     step: int = Field(
         ...,
@@ -152,15 +292,21 @@ class JourneyStep(PRISMBaseModel):
     evidence_type: EvidenceType
 
 
-class PersonaSimulation(PRISMBaseModel):
+class PersonaSimulation(
+    PRISMBaseModel
+):
 
     persona: PersonaType
 
-    journey_steps: List[JourneyStep]
+    journey_steps: list[
+        JourneyStep
+    ]
 
-    friction_points: List[str]
+    friction_points: list[str]
 
-    drop_off_reason: Optional[str] = None
+    drop_off_reason: (
+        Optional[str]
+    ) = None
 
     satisfaction_score: float = Field(
         ...,
@@ -168,17 +314,40 @@ class PersonaSimulation(PRISMBaseModel):
         le=10.0
     )
 
+    @field_validator(
+        "journey_steps"
+    )
+    @classmethod
+    def validate_journey_steps(
+        cls,
+        value: list[JourneyStep]
+    ) -> list[JourneyStep]:
 
-class SimulationOutput(PRISMBaseModel):
+        if not value:
 
-    personas: List[PersonaSimulation]
+            raise ValueError(
+                "Journey steps cannot be empty"
+            )
+
+        return value
+
+
+class SimulationOutput(
+    PRISMBaseModel
+):
+
+    personas: list[
+        PersonaSimulation
+    ]
 
 
 # =========================================================
 # PROBLEM DETECTION
 # =========================================================
 
-class ProblemEvidence(PRISMBaseModel):
+class ProblemEvidence(
+    PRISMBaseModel
+):
 
     persona_type: PersonaType
 
@@ -200,10 +369,14 @@ class ProblemEvidence(PRISMBaseModel):
 
     is_drop_off_step: bool
 
-    drop_off_reason: Optional[str] = None
+    drop_off_reason: (
+        Optional[str]
+    ) = None
 
 
-class DetectedProblem(PRISMBaseModel):
+class DetectedProblem(
+    PRISMBaseModel
+):
 
     id: str = Field(
         ...,
@@ -214,7 +387,7 @@ class DetectedProblem(PRISMBaseModel):
 
     description: str = Field(
         ...,
-        min_length=1
+        min_length=10
     )
 
     severity: int = Field(
@@ -229,19 +402,61 @@ class DetectedProblem(PRISMBaseModel):
 
     confidence_level: ConfidenceLevel
 
-    business_impact: BusinessImpactType
+    business_impact: (
+        BusinessImpactType
+    )
 
 
-class ProblemOutput(PRISMBaseModel):
+class ProblemOutput(
+    PRISMBaseModel
+):
 
-    problems: List[DetectedProblem]
+    problems: list[
+        DetectedProblem
+    ]
 
+# =========================================================
+# ROOT CAUSE ANALYSIS
+# =========================================================
+
+class RootCause(
+    PRISMBaseModel
+):
+
+    problem_id: str = Field(
+        ...,
+        min_length=1
+    )
+
+    problem_type: ProblemType
+
+    root_cause: str = Field(
+        ...,
+        min_length=15
+    )
+
+    evidence_summary: str = Field(
+        ...,
+        min_length=10
+    )
+
+    confidence_level: ConfidenceLevel
+
+class RootCauseOutput(
+    PRISMBaseModel
+):
+
+    root_causes: list[
+        RootCause
+    ]
 
 # =========================================================
 # DECISION ENGINE
 # =========================================================
 
-class DecisionTrace(PRISMBaseModel):
+class DecisionTrace(
+    PRISMBaseModel
+):
 
     persona: PersonaType
 
@@ -263,23 +478,63 @@ class DecisionTrace(PRISMBaseModel):
     problem_type: ProblemType
 
 
-class Decision(PRISMBaseModel):
 
-    priority_rank: Optional[int] = None
+class Decision(
+    PRISMBaseModel
+):
+
+    priority_rank: (
+        Optional[int]
+    ) = None
 
     action: str = Field(
         ...,
-        min_length=1
+        min_length=3
+    )
+    root_cause: str = Field(
+        ...,
+        min_length=10,
+        description=(
+            "Underlying reason why "
+            "the problem occurs"
+        )
+    )
+
+    business_outcome: str = Field(
+        ...,
+        min_length=5,
+        description=(
+            "Expected business outcome "
+            "if implemented"
+        )
+    )
+
+    success_metric: str = Field(
+        ...,
+        min_length=3,
+        description=(
+            "Primary metric expected "
+            "to improve"
+        )
+    )
+
+    decision_rationale: str = Field(
+        ...,
+        min_length=10,
+        description=(
+            "Evidence-based reasoning "
+            "behind this recommendation"
+        )
     )
 
     expected_impact: str = Field(
         ...,
-        min_length=1
+        min_length=3
     )
 
     impact_range: str = Field(
         ...,
-        min_length=1
+        min_length=3
     )
 
     impact_type: ImpactType
@@ -310,23 +565,30 @@ class Decision(PRISMBaseModel):
         le=10
     )
 
-    rice_score: Optional[float] = None
+    rice_score: (
+        Optional[float]
+    ) = None
 
-    confidence_level: ConfidenceLevel
+    confidence_level: (
+        ConfidenceLevel
+    )
 
     implementation_hint: str = Field(
         ...,
-        min_length=1
+        min_length=5
     )
 
     trace: DecisionTrace
+
 
 
 # =========================================================
 # HEALTH SCORE
 # =========================================================
 
-class HealthDimensions(PRISMBaseModel):
+class HealthDimensions(
+    PRISMBaseModel
+):
 
     ux: float = Field(
         ...,
@@ -359,15 +621,23 @@ class HealthDimensions(PRISMBaseModel):
     )
 
 
-class DecisionOutput(PRISMBaseModel):
+class DecisionOutput(
+    PRISMBaseModel
+):
 
-    decisions: List[Decision]
+    decisions: list[
+        Decision
+    ]
 
-    product_health_score: Optional[float] = None
+    product_health_score: (
+        Optional[float]
+    ) = None
 
-    health_dimensions: Optional[
-        HealthDimensions
-    ] = None
+    health_dimensions: (
+        Optional[
+            HealthDimensions
+        ]
+    ) = None
 
 
 # =========================================================
@@ -384,25 +654,28 @@ class PRISMAnalysisResponse(
 
     problems: ProblemOutput
 
+    root_causes: RootCauseOutput
+
     decisions: DecisionOutput
 
     analyzed_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC)
+        default_factory=lambda:
+        datetime.now(UTC)
     )
 
-    pipeline_version: str = "2.1"
-
+    pipeline_version: str = (
+        "2.5"
+    )
 
 # =========================================================
-# API RESPONSE WRAPPER
+# API RESPONSE
 # =========================================================
 
-class APIResponse(PRISMBaseModel):
+class APIResponse(
+    PRISMBaseModel
+):
 
-    status: Literal[
-        "success",
-        "error"
-    ]
+    status: str
 
     data: Optional[
         PRISMAnalysisResponse
