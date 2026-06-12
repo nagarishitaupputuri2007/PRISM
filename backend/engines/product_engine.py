@@ -42,6 +42,7 @@ from backend.core.metrics import (
     increment_counter
 )
 
+
 from backend.knowledge.product_registry import (
     get_known_product
 )
@@ -91,8 +92,8 @@ def build_prompt(
         knowledge_context = f"""
     KNOWN PRODUCT DATA:
 
-    Name:
-    {known_product["name"]}
+    Product Name:
+    {known_product["product_name"]}
 
     Category:
     {known_product["category"]}
@@ -125,6 +126,13 @@ IMPORTANT:
 - confidence_score must be between 0 and 1
 - confidence_level must match confidence_score
 - If uncertain, reduce confidence
+
+If product is unknown:
+- classify category as "Unverified Product"
+- confidence_score below 0.40
+- do not invent competitors
+- do not invent business metrics
+- do not invent business model
 """
 
 
@@ -343,7 +351,7 @@ async def get_product_understanding(
         )
 
         # -------------------------------------------------
-        # BUILD PROMPT
+        # KNOWLEDGE LOOKUP
         # -------------------------------------------------
 
         known_product = (
@@ -352,9 +360,27 @@ async def get_product_understanding(
             )
         )
 
+        if known_product:
+
+            LOGGER.info(
+                f"Knowledge hit: {product_name}"
+            )
+
+            increment_counter(
+                "knowledge_hits"
+            )
+
+            return ProductUnderstanding(
+                **known_product
+            )
+
+        # -------------------------------------------------
+        # BUILD PROMPT
+        # -------------------------------------------------
+
         prompt = build_prompt(
             product_name,
-            known_product
+            None
         )
         # -------------------------------------------------
         # AI GENERATION

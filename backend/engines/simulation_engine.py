@@ -332,17 +332,63 @@ def validate_simulation_output(
 
     for persona in simulation.personas:
 
-        if len(
-            persona.journey_steps
-        ) < 1:
+        if len(persona.journey_steps) < 4:
 
             raise ValueError(
-                f"{persona.persona} "
-                f"has no journey steps"
+                f"{persona.persona} must contain "
+                f"at least 4 journey steps"
             )
 
-    return simulation
+        # -------------------------------------------------
+        # FRICTION VALIDATION
+        # -------------------------------------------------
 
+        if len(persona.friction_points) < 1:
+
+            raise ValueError(
+                f"{persona.persona} must contain "
+                f"at least 1 friction point"
+            )
+
+        # -------------------------------------------------
+        # CHURN VALIDATION
+        # -------------------------------------------------
+
+        if (
+            persona.persona
+            == "churned_user"
+            and not persona.drop_off_reason
+        ):
+
+            raise ValueError(
+                "Churned user requires "
+                "drop_off_reason"
+            )
+
+        # -------------------------------------------------
+        # STEP VALIDATION
+        # -------------------------------------------------
+
+        for step in persona.journey_steps:
+
+            if (
+                step.confusion_level < 1
+                or step.confusion_level > 5
+            ):
+
+                raise ValueError(
+                    f"Invalid confusion level "
+                    f"for {persona.persona}"
+                )
+
+            if step.time_spent_seconds < 1:
+
+                raise ValueError(
+                    f"Invalid time spent "
+                    f"for {persona.persona}"
+                )
+
+    return simulation
 
 # =========================================================
 # NORMALIZATION

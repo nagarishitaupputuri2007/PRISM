@@ -1,8 +1,25 @@
 {
   "spotify": {
-    "name": "Spotify",
-    "category": "Music Streaming"
-  },
+  "product_name": "Spotify",
+  "category": "Music Streaming",
+  "target_users": [
+    "music listeners",
+    "podcast listeners"
+  ],
+  "core_features": [
+    "music streaming",
+    "playlist creation",
+    "personalized recommendations"
+  ],
+  "value_prop": "Access millions of songs and podcasts instantly",
+  "business_model": "Freemium Subscription",
+  "competitors": [
+    "Apple Music",
+    "YouTube Music"
+  ],
+  "confidence_score": 1.0,
+  "confidence_level": "high"
+},
 
   "youtube": {
     "name": "YouTube",

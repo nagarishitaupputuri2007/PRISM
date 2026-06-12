@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 
 PRODUCT_FILE = (
@@ -8,7 +9,7 @@ PRODUCT_FILE = (
 )
 
 
-def load_products() -> dict:
+def load_products() -> dict[str, Any]:
 
     with open(
         PRODUCT_FILE,
@@ -24,8 +25,26 @@ PRODUCTS = load_products()
 
 def get_known_product(
     product_name: str
-):
+) -> dict[str, Any] | None:
 
     return PRODUCTS.get(
         product_name.lower()
+    )
+
+def is_known_product(
+    product_name: str
+) -> bool:
+
+    return (
+        product_name.lower()
+        in PRODUCTS
+    )
+
+def is_known_product(
+    product_name: str
+) -> bool:
+
+    return (
+        product_name.lower()
+        in PRODUCTS
     )
