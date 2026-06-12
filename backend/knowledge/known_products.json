@@ -1,0 +1,46 @@
+{
+  "spotify": {
+    "name": "Spotify",
+    "category": "Music Streaming"
+  },
+
+  "youtube": {
+    "name": "YouTube",
+    "category": "Video Streaming"
+  },
+
+  "netflix": {
+    "name": "Netflix",
+    "category": "Video Streaming"
+  },
+
+  "amazon": {
+    "name": "Amazon",
+    "category": "E-Commerce"
+  },
+
+  "flipkart": {
+    "name": "Flipkart",
+    "category": "E-Commerce"
+  },
+
+  "swiggy": {
+    "name": "Swiggy",
+    "category": "Food Delivery"
+  },
+
+  "zomato": {
+    "name": "Zomato",
+    "category": "Food Delivery"
+  },
+
+  "uber": {
+    "name": "Uber",
+    "category": "Ride Sharing"
+  },
+
+  "ola": {
+    "name": "Ola",
+    "category": "Ride Sharing"
+  }
+}

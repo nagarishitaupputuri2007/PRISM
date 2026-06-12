@@ -190,6 +190,36 @@ class AnalyzeRequest(
         examples=["Spotify"]
     )
 
+# =========================================================
+# PRODUCT VERIFICATION
+# =========================================================
+
+class ProductVerification(
+    PRISMBaseModel
+):
+
+    verified: bool
+
+    canonical_name: str = Field(
+        ...,
+        min_length=1
+    )
+
+    category: str = Field(
+        ...,
+        min_length=1
+    )
+
+    confidence_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0
+    )
+
+    verification_reason: str = Field(
+        ...,
+        min_length=5
+    )
 
 # =========================================================
 # PRODUCT UNDERSTANDING

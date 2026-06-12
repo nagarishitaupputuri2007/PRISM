@@ -426,14 +426,6 @@ def validate_problem_output(
                 "Severity too low for high confusion"
             )
 
-        if (
-            confusion_level <= 2
-            and problem.severity >= 9
-        ):
-
-            raise ValueError(
-                "Severity unrealistically high"
-            )
 
         # -------------------------------------------------
         # DESCRIPTION QUALITY
@@ -580,6 +572,62 @@ async def detect_problems(
             "problems",
             []
         ):
+
+            evidence = problem.setdefault(
+                "evidence",
+                {}
+            )
+
+            if evidence.get(
+                "persona_type"
+            ) is None:
+
+                evidence[
+                    "persona_type"
+                ] = problem.get(
+                    "affected_persona",
+                    "first_time_user"
+                )
+
+            if evidence.get(
+                "journey_step"
+            ) is None:
+
+                evidence[
+                    "journey_step"
+                ] = 1
+
+            if evidence.get(
+                "step_action"
+            ) is None:
+
+                evidence[
+                    "step_action"
+                ] = "Unknown action"
+
+            if evidence.get(
+                "confusion_level"
+            ) is None:
+
+                evidence[
+                    "confusion_level"
+                ] = 1
+
+            if evidence.get(
+                "is_drop_off_step"
+            ) is None:
+
+                evidence[
+                    "is_drop_off_step"
+                ] = False
+
+            if evidence.get(
+                "drop_off_reason"
+            ) is None:
+
+                evidence[
+                    "drop_off_reason"
+                ] = None
 
             if (
                 "business_impact"

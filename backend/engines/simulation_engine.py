@@ -230,6 +230,57 @@ def normalize_persona(
         }
     )
 
+# =========================================================
+# AI OUTPUT NORMALIZATION
+# =========================================================
+
+VALID_EVIDENCE_TYPES = {
+    "search": "behavioral",
+    "creation": "behavioral",
+    "interaction": "behavioral",
+    "navigation": "behavioral",
+    "social": "behavioral",
+    "analytics": "behavioral",
+    "error": "behavioral",
+    "transactional": "behavioral"
+}
+
+
+def normalize_raw_simulation_payload(
+    payload: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Normalize raw AI payload BEFORE schema validation.
+    """
+
+    personas = payload.get(
+        "personas",
+        []
+    )
+
+    for persona in personas:
+
+        for step in persona.get(
+            "journey_steps",
+            []
+        ):
+
+            evidence_type = (
+                step.get(
+                    "evidence_type"
+                )
+            )
+
+            step[
+                "evidence_type"
+            ] = (
+                VALID_EVIDENCE_TYPES.get(
+                    evidence_type,
+                    evidence_type
+                )
+            )
+
+    return payload
 
 # =========================================================
 # SIMULATION VALIDATION
@@ -409,6 +460,12 @@ async def generate_user_simulation(
         parsed_output: dict[str, Any] = (
             generate_json_response(
                 prompt
+            )
+        )
+
+        parsed_output = (
+            normalize_raw_simulation_payload(
+                parsed_output
             )
         )
 

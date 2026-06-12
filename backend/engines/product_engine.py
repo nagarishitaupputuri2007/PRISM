@@ -42,6 +42,9 @@ from backend.core.metrics import (
     increment_counter
 )
 
+from backend.knowledge.product_registry import (
+    get_known_product
+)
 
 # =========================================================
 # LOGGER
@@ -77,13 +80,29 @@ RULES:
 # =========================================================
 
 def build_prompt(
-    product_name: str
+    product_name: str,
+    known_product: dict | None
 ) -> str:
+    
+    knowledge_context = ""
+
+    if known_product:
+
+        knowledge_context = f"""
+    KNOWN PRODUCT DATA:
+
+    Name:
+    {known_product["name"]}
+
+    Category:
+    {known_product["category"]}
+    """
 
     return f"""
 {SYSTEM_PROMPT}
 
 Analyze the following product:
+{knowledge_context}
 
 PRODUCT:
 {product_name}
@@ -143,13 +162,21 @@ def normalize_response(
     Normalize AI response safely.
     """
 
-    confidence_score = float(
-        payload.get(
-            "confidence_score",
-            0.5
-        )
-    )
+    try:
 
+        confidence_score = float(
+            payload.get(
+                "confidence_score",
+                0.5
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        confidence_score = 0.5
     confidence_score = max(
         0.0,
         min(confidence_score, 1.0)
@@ -189,20 +216,109 @@ def build_fallback_response(
 
     return ProductUnderstanding(
         product_name=product_name,
-        category="Unknown",
+        category="Unverified Product",
         target_users=[
             "general users"
         ],
         core_features=[
-            "core functionality"
+            "core functionality",
+            "basic service",
+            "primary workflow"
         ],
         value_prop="Analysis unavailable",
         business_model="Unknown",
-        competitors=[],
+        competitors=[
+            "unknown competitor"
+        ],
         confidence_score=0.1,
         confidence_level="low"
     )
 
+# =========================================================
+# BUSINESS VALIDATION
+# =========================================================
+
+def validate_product_understanding(
+    product: ProductUnderstanding,
+    requested_product: str
+) -> ProductUnderstanding:
+    """
+    Validate generated product understanding.
+    """
+
+    # -----------------------------------------------------
+    # Confidence threshold
+    # -----------------------------------------------------
+
+    if product.confidence_score < 0.30:
+
+        raise ValueError(
+            "Confidence score too low"
+        )
+
+    # -----------------------------------------------------
+    # Category validation
+    # -----------------------------------------------------
+    if (
+        not product.category
+        or product.category.lower()
+        in {
+            "unknown",
+            "unverified product"
+        }
+    ):
+
+        raise ValueError(
+            "Invalid category"
+        )
+
+    # -----------------------------------------------------
+    # Core feature validation
+    # -----------------------------------------------------
+
+    if len(product.core_features) < 3:
+
+        raise ValueError(
+            "Insufficient core features"
+        )
+
+    # -----------------------------------------------------
+    # Competitor validation
+    # -----------------------------------------------------
+
+    if len(product.competitors) < 1:
+
+        raise ValueError(
+            "Insufficient competitors"
+        )
+
+    # -----------------------------------------------------
+    # Product name validation
+    # -----------------------------------------------------
+
+    requested = (
+        requested_product
+        .strip()
+        .lower()
+    )
+
+    returned = (
+        product.product_name
+        .strip()
+        .lower()
+    )
+
+    if (
+        requested not in returned
+        and returned not in requested
+    ):
+
+        raise ValueError(
+            "Product name mismatch"
+        )
+
+
+    return product
 
 # =========================================================
 # MAIN ENGINE FUNCTION
@@ -230,10 +346,16 @@ async def get_product_understanding(
         # BUILD PROMPT
         # -------------------------------------------------
 
-        prompt = build_prompt(
-            product_name
+        known_product = (
+            get_known_product(
+                product_name
+            )
         )
 
+        prompt = build_prompt(
+            product_name,
+            known_product
+        )
         # -------------------------------------------------
         # AI GENERATION
         # -------------------------------------------------
@@ -264,6 +386,13 @@ async def get_product_understanding(
             )
         )
 
+        validated_output = (
+            validate_product_understanding(
+                validated_output,
+                product_name
+            )
+        )
+
         LOGGER.info(
             "Product understanding generated successfully"
         )
@@ -286,6 +415,24 @@ async def get_product_understanding(
             f"{error}"
         )
 
+
+    # =====================================================
+    # BUSINESS VALIDATION FAILURE
+    # =====================================================
+
+    except ValueError as error:
+
+        increment_counter(
+            "product_engine_business_validation_failures"
+        )
+
+        LOGGER.error(
+            f"[product_engine] "
+            f"Business validation failed: "
+            f"{error}"
+        )
+
+
     # =====================================================
     # GENERAL FAILURE
     # =====================================================
@@ -301,6 +448,7 @@ async def get_product_understanding(
             f"Engine execution failed: "
             f"{error}"
         )
+
 
     # =====================================================
     # FALLBACK RESPONSE
