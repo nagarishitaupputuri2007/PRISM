@@ -1,63 +1,199 @@
 {
-  "spotify": {
-  "product_name": "Spotify",
-  "category": "Music Streaming",
-  "target_users": [
-    "music listeners",
-    "podcast listeners"
-  ],
-  "core_features": [
-    "music streaming",
-    "playlist creation",
-    "personalized recommendations"
-  ],
-  "value_prop": "Access millions of songs and podcasts instantly",
-  "business_model": "Freemium Subscription",
-  "competitors": [
-    "Apple Music",
-    "YouTube Music"
-  ],
-  "confidence_score": 1.0,
-  "confidence_level": "high"
+"spotify": {
+"product_name": "Spotify",
+"category": "Music Streaming",
+"target_users": [
+"music listeners",
+"podcast listeners"
+],
+"core_features": [
+"music streaming",
+"playlist creation",
+"personalized recommendations"
+],
+"value_prop": "Access millions of songs and podcasts instantly",
+"business_model": "Freemium Subscription",
+"competitors": [
+"Apple Music",
+"YouTube Music"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
 },
 
-  "youtube": {
-    "name": "YouTube",
-    "category": "Video Streaming"
-  },
+"youtube": {
+"product_name": "YouTube",
+"category": "Video Streaming",
+"target_users": [
+"video viewers",
+"content creators"
+],
+"core_features": [
+"video streaming",
+"channel subscriptions",
+"content recommendations"
+],
+"value_prop": "Watch, upload, and share videos globally",
+"business_model": "Advertising + Premium Subscription",
+"competitors": [
+"Netflix",
+"TikTok"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "netflix": {
-    "name": "Netflix",
-    "category": "Video Streaming"
-  },
+"netflix": {
+"product_name": "Netflix",
+"category": "Video Streaming",
+"target_users": [
+"movie viewers",
+"series viewers"
+],
+"core_features": [
+"video streaming",
+"personalized recommendations",
+"original content"
+],
+"value_prop": "On-demand access to movies and TV shows",
+"business_model": "Subscription",
+"competitors": [
+"Amazon Prime Video",
+"Disney+"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "amazon": {
-    "name": "Amazon",
-    "category": "E-Commerce"
-  },
+"amazon": {
+"product_name": "Amazon",
+"category": "E-Commerce",
+"target_users": [
+"online shoppers",
+"business buyers"
+],
+"core_features": [
+"product marketplace",
+"fast delivery",
+"customer reviews"
+],
+"value_prop": "Convenient online shopping with a vast product selection",
+"business_model": "Marketplace + Subscription",
+"competitors": [
+"Walmart",
+"Flipkart"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "flipkart": {
-    "name": "Flipkart",
-    "category": "E-Commerce"
-  },
+"flipkart": {
+"product_name": "Flipkart",
+"category": "E-Commerce",
+"target_users": [
+"online shoppers",
+"mobile-first consumers"
+],
+"core_features": [
+"product marketplace",
+"online payments",
+"order tracking"
+],
+"value_prop": "Affordable online shopping tailored to Indian consumers",
+"business_model": "Marketplace",
+"competitors": [
+"Amazon",
+"Meesho"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "swiggy": {
-    "name": "Swiggy",
-    "category": "Food Delivery"
-  },
+"swiggy": {
+"product_name": "Swiggy",
+"category": "Food Delivery",
+"target_users": [
+"food customers",
+"restaurant partners"
+],
+"core_features": [
+"food ordering",
+"real-time tracking",
+"restaurant discovery"
+],
+"value_prop": "Fast and convenient food delivery",
+"business_model": "Commission + Delivery Fees",
+"competitors": [
+"Zomato",
+"Uber Eats"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "zomato": {
-    "name": "Zomato",
-    "category": "Food Delivery"
-  },
+"zomato": {
+"product_name": "Zomato",
+"category": "Food Delivery",
+"target_users": [
+"food customers",
+"restaurant explorers"
+],
+"core_features": [
+"food ordering",
+"restaurant reviews",
+"table reservations"
+],
+"value_prop": "Discover restaurants and order food seamlessly",
+"business_model": "Commission + Advertising",
+"competitors": [
+"Swiggy",
+"Uber Eats"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "uber": {
-    "name": "Uber",
-    "category": "Ride Sharing"
-  },
+"uber": {
+"product_name": "Uber",
+"category": "Ride Sharing",
+"target_users": [
+"commuters",
+"drivers"
+],
+"core_features": [
+"ride booking",
+"real-time tracking",
+"digital payments"
+],
+"value_prop": "Reliable on-demand transportation",
+"business_model": "Commission",
+"competitors": [
+"Lyft",
+"Ola"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+},
 
-  "ola": {
-    "name": "Ola",
-    "category": "Ride Sharing"
-  }
+"ola": {
+"product_name": "Ola",
+"category": "Ride Sharing",
+"target_users": [
+"commuters",
+"drivers"
+],
+"core_features": [
+"ride booking",
+"cab scheduling",
+"digital payments"
+],
+"value_prop": "Affordable and accessible transportation services",
+"business_model": "Commission",
+"competitors": [
+"Uber",
+"Rapido"
+],
+"confidence_score": 1.0,
+"confidence_level": "high"
+}
 }

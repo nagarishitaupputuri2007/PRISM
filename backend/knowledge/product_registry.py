@@ -31,14 +31,7 @@ def get_known_product(
         product_name.lower()
     )
 
-def is_known_product(
-    product_name: str
-) -> bool:
 
-    return (
-        product_name.lower()
-        in PRODUCTS
-    )
 
 def is_known_product(
     product_name: str
